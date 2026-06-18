@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-rag-eval"
+version = "0.1.0"
+description = "Local RAG pipeline runner and metric calculator for golden questions."
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=2.18.0",
+    "langchain-openai>=0.1.0",
+    "langchain-community>=0.3.0",
+    "openai>=1.0.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "ragas>=0.4.0",
+    "requests>=2.31.0",
+    "transformers>=4.40.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
