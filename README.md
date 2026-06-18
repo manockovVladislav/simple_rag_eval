@@ -50,14 +50,12 @@ GIGACHAT_API_KEY_ENV = "GIGACHAT_API_KEY"
 
 - `question` - вопрос.
 - `expected_answer` - эталонный ответ для answer/Ragas метрик.
-- `expected_context_ids` - id релевантных документов для deterministic retrieval метрик.
 
 Названия колонок меняются в `config.py`:
 
 ```python
 QUESTION_COLUMN = "question"
 EXPECTED_ANSWER_COLUMN = "expected_answer"
-EXPECTED_CONTEXT_IDS_COLUMN = "expected_context_ids"
 ```
 
 ## Pipeline Adapter
@@ -76,16 +74,17 @@ PIPELINE_FACTORY = "my_project.my_rag:create_pipeline"
 {
     "answer": "...",
     "retriever_contexts": [
-        {"id": "doc_1", "text": "...", "score": 0.91},
+        {"text": "...", "score": 0.91},
+        {"text": "...", "score": 0.82},
     ],
     "reranker_contexts": [
-        {"id": "doc_1", "text": "...", "score": 0.97},
+        {"text": "...", "score": 0.97},
     ],
     "metadata": {},
 }
 ```
 
-Если retriever, reranker или answer отсутствует, верните пустой список или `None`; метрики для отсутствующей части не считаются.
+Контексты могут быть и просто списком строк. Главное, чтобы в них был текст. Если retriever, reranker или answer отсутствует, верните пустой список или `None`; метрики для отсутствующей части не считаются.
 
 ## Запуск
 
@@ -131,6 +130,33 @@ outputs/metrics/metrics_summary.xlsx
 
 В начале листов идут служебные поля и метрики судьи `ragas_*`, затем остальные метрики.
 
+`summary` содержит агрегаты по прогону:
+
+- `created_at`, `run_file`, `question_count`, `error_count`
+- `ragas_retriever_context_precision_mean/count`
+- `ragas_retriever_context_recall_mean/count`
+- `ragas_reranker_context_precision_mean/count`
+- `ragas_reranker_context_recall_mean/count`
+- `ragas_faithfulness_mean/count`
+- `ragas_answer_correctness_mean/count`
+- `answer_exact_match_mean/count`
+- `answer_contains_expected_mean/count`
+- `answer_token_f1_mean/count`
+
+`details` содержит значения по каждому вопросу:
+
+- `created_at`, `run_file`, `question_id`, `question`, `has_error`
+- `ragas_retriever_context_precision`
+- `ragas_retriever_context_recall`
+- `ragas_reranker_context_precision`
+- `ragas_reranker_context_recall`
+- `ragas_faithfulness`
+- `ragas_answer_correctness`
+- `ragas_error`
+- `answer_exact_match`
+- `answer_contains_expected`
+- `answer_token_f1`
+
 ## Метрики
 
 Ragas LLM judge:
@@ -150,13 +176,7 @@ RAGAS_TIMEOUT_SECONDS = 60
 RAGAS_MAX_RETRIES = 0
 ```
 
-Deterministic retrieval метрики по `expected_context_ids`:
-
-- `precision@k`
-- `recall@k`
-- `hit@k`
-- `mrr@k`
-- `ndcg@k`
+Retrieval оценивается по тексту контекстов. Например, если retriever вернул список из 10 текстовых фрагментов, Ragas judge проверяет, помогают ли эти фрагменты ответить на вопрос и покрывают ли они `expected_answer`.
 
 Локальные answer метрики:
 

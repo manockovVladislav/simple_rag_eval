@@ -7,7 +7,6 @@ SUMMARY_METRICS_FILE = "outputs/metrics/metrics_summary.xlsx"
 # Golden dataset columns
 QUESTION_COLUMN = "question"
 EXPECTED_ANSWER_COLUMN = "expected_answer"
-EXPECTED_CONTEXT_IDS_COLUMN = "expected_context_ids"
 
 # Your RAG pipeline adapter
 PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
@@ -16,8 +15,7 @@ PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 MAX_QUESTIONS = None
 SLEEP_SECONDS = 0
 
-# Deterministic metrics
-CONTEXT_KS = [1, 3, 5, 10]
+# Local answer metrics
 ANSWER_METRICS_ENABLED = True
 
 # Ragas LLM judge

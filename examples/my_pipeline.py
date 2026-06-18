@@ -6,11 +6,11 @@ from rag_eval import ContextItem, PipelineResult
 class ExamplePipeline:
     def answer_question(self, question: str) -> PipelineResult:
         retriever_contexts = [
-            ContextItem(id="doc_1", text="Пример найденного документа.", score=0.9),
-            ContextItem(id="doc_2", text="Еще один контекст ретривера.", score=0.8),
+            ContextItem(text="Пример найденного документа.", score=0.9),
+            ContextItem(text="Еще один контекст ретривера.", score=0.8),
         ]
         reranker_contexts = [
-            ContextItem(id="doc_1", text="Пример найденного документа.", score=0.95),
+            ContextItem(text="Пример найденного документа.", score=0.95),
         ]
         return PipelineResult(
             answer=f"Демо-ответ на вопрос: {question}",

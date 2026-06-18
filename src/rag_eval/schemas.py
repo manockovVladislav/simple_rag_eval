@@ -7,7 +7,6 @@ from typing import Any
 @dataclass(slots=True)
 class ContextItem:
     text: str
-    id: str | None = None
     score: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -18,20 +17,17 @@ class ContextItem:
         if isinstance(value, str):
             return cls(text=value)
         if isinstance(value, dict):
-            item_id = value.get("id") or value.get("doc_id") or value.get("document_id")
             text = value.get("text") or value.get("content") or value.get("page_content") or ""
             score = value.get("score")
-            metadata = value.get("metadata") or {}
-            return cls(text=str(text), id=str(item_id) if item_id is not None else None, score=score, metadata=metadata)
+            metadata = {key: item for key, item in value.items() if key not in {"text", "content", "page_content", "score"}}
+            return cls(text=str(text), score=score, metadata=metadata)
         text = getattr(value, "page_content", None) or getattr(value, "text", None) or str(value)
-        item_id = getattr(value, "id", None) or getattr(value, "doc_id", None)
         metadata = getattr(value, "metadata", {}) or {}
         score = getattr(value, "score", None)
-        return cls(text=str(text), id=str(item_id) if item_id is not None else None, score=score, metadata=metadata)
+        return cls(text=str(text), score=score, metadata=metadata)
 
     def to_record(self) -> dict[str, Any]:
         return {
-            "id": self.id,
             "score": self.score,
             "text": self.text,
             "metadata": self.metadata,

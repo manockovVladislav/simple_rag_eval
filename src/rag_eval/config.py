@@ -18,7 +18,6 @@ class PathsConfig:
 class GoldenColumnsConfig:
     question: str = "question"
     expected_answer: str = "expected_answer"
-    expected_context_ids: str = "expected_context_ids"
 
 
 @dataclass(slots=True)
@@ -34,7 +33,6 @@ class RunConfig:
 
 @dataclass(slots=True)
 class MetricsConfig:
-    context_ks: list[int] = field(default_factory=lambda: [1, 3, 5, 10])
     answer_enabled: bool = True
     ragas_enabled: bool = True
     ragas_judge_provider: str = "qwen"
@@ -152,7 +150,6 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "golden_columns": {
             "question": getattr(module, "QUESTION_COLUMN", "question"),
             "expected_answer": getattr(module, "EXPECTED_ANSWER_COLUMN", "expected_answer"),
-            "expected_context_ids": getattr(module, "EXPECTED_CONTEXT_IDS_COLUMN", "expected_context_ids"),
         },
         "pipeline": {
             "factory": getattr(module, "PIPELINE_FACTORY", ""),
@@ -162,7 +159,6 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "sleep_seconds": getattr(module, "SLEEP_SECONDS", 0),
         },
         "metrics": {
-            "context_ks": getattr(module, "CONTEXT_KS", [1, 3, 5, 10]),
             "answer_enabled": getattr(module, "ANSWER_METRICS_ENABLED", True),
             "ragas_enabled": getattr(module, "RAGAS_ENABLED", True),
             "ragas_judge_provider": getattr(module, "RAGAS_JUDGE_PROVIDER", "qwen"),

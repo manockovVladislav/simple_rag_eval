@@ -81,21 +81,3 @@ def contexts_from_json(value: Any) -> list[dict[str, Any]]:
     if not isinstance(parsed, list):
         return []
     return [item for item in parsed if isinstance(item, dict)]
-
-
-def parse_expected_ids(value: Any) -> list[str]:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    text = str(value).strip()
-    if not text:
-        return []
-    if text.startswith("["):
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                return [str(item).strip() for item in parsed if str(item).strip()]
-        except json.JSONDecodeError:
-            pass
-    return [part.strip() for part in text.replace("\n", ",").replace(";", ",").split(",") if part.strip()]

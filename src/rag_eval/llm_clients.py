@@ -48,10 +48,6 @@ class OpenAICompatibleClient:
         return headers
 
 
-class QwenLocalClient(OpenAICompatibleClient):
-    pass
-
-
 class GigaChatApiClient(OpenAICompatibleClient):
     def __init__(self, config: ModelConfig):
         super().__init__(config)
@@ -111,14 +107,8 @@ def make_model_client(provider: str, configs: dict[str, ModelConfig]) -> OpenAIC
     config = configs[provider]
     if config.provider == "qwen_transformers":
         raise ValueError("Qwen is configured through transformers, not HTTP API. Use RagasEvaluator or your pipeline adapter.")
-    if config.provider == "qwen_local" or provider in {"qwen", "qwen3"}:
-        return QwenLocalClient(config)
     if config.provider == "gigachat_api" or provider == "gigachat":
         return GigaChatApiClient(config)
-    if provider in {"qwen", "qwen3"}:
-        return QwenLocalClient(configs[provider])
-    if provider == "gigachat":
-        return GigaChatApiClient(configs[provider])
     return OpenAICompatibleClient(config)
 
 

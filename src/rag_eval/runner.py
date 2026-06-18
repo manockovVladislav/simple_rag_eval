@@ -49,7 +49,6 @@ class EvaluationRunner:
                     "question_id": row.get("id", index + 1),
                     "question": question,
                     "expected_answer": row.get(self.config.golden_columns.expected_answer),
-                    "expected_context_ids": row.get(self.config.golden_columns.expected_context_ids),
                     "answer": result.answer,
                     "retriever_contexts": contexts_to_json(result.retriever_contexts),
                     "reranker_contexts": contexts_to_json(result.reranker_contexts),
