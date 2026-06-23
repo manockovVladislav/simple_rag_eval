@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -48,67 +47,40 @@ class OpenAICompatibleClient:
         return headers
 
 
-class GigaChatApiClient(OpenAICompatibleClient):
+class GigaChatLangChainClient:
     def __init__(self, config: ModelConfig):
-        super().__init__(config)
-        self._access_token: str | None = None
+        self.config = config
+        self._client = None
 
-    def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        token = self.get_bearer_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        return headers
+    def chat(self, messages: list[ChatMessage | dict[str, Any]]) -> str:
+        response = self._model().invoke([_to_langchain_message(message) for message in messages])
+        return str(response.content)
 
-    def get_bearer_token(self) -> str:
-        if self.config.auth_type == "bearer_env":
-            if not self.config.api_key_env:
-                raise ValueError("GigaChat bearer auth requires api_key_env in config.")
-            token = os.getenv(self.config.api_key_env, "")
-            if not token:
-                raise ValueError(f"Environment variable {self.config.api_key_env} is empty.")
-            return token
+    def _model(self):
+        if self._client is None:
+            try:
+                from langchain_gigachat.chat_models import GigaChat
+            except ImportError:
+                from langchain_community.chat_models.gigachat import GigaChat
 
-        if self.config.auth_type == "gigachat_oauth":
-            if self._access_token:
-                return self._access_token
-            if not self.config.token_url:
-                raise ValueError("GigaChat OAuth auth requires token_url in config.")
-            if not self.config.credentials_env:
-                raise ValueError("GigaChat OAuth auth requires credentials_env in config.")
-            credentials = os.getenv(self.config.credentials_env, "")
-            if not credentials:
-                raise ValueError(f"Environment variable {self.config.credentials_env} is empty.")
-            response = requests.post(
-                self.config.token_url,
-                headers={
-                    "Authorization": f"Basic {credentials}",
-                    "RqUID": str(uuid.uuid4()),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={"scope": self.config.scope},
-                timeout=self.config.timeout_seconds,
-                verify=self.config.verify_ssl,
+            self._client = GigaChat(
+                base_url=self.config.base_url,
+                access_token=self.config.access_token,
+                model=self.config.model,
+                temperature=self.config.temperature,
+                rate_limiter=_rate_limiter(self.config),
             )
-            response.raise_for_status()
-            data = response.json()
-            token = data.get("access_token")
-            if not token:
-                raise ValueError("GigaChat token response does not contain access_token.")
-            self._access_token = str(token)
-            return self._access_token
-
-        raise ValueError("GigaChat API config must use auth_type='bearer_env' or 'gigachat_oauth'.")
+        return self._client
 
 
-def make_model_client(provider: str, configs: dict[str, ModelConfig]) -> OpenAICompatibleClient:
+def make_model_client(provider: str, configs: dict[str, ModelConfig]) -> Any:
     if provider not in configs:
         raise ValueError(f"Model provider '{provider}' is not configured.")
     config = configs[provider]
     if config.provider == "qwen_transformers":
         raise ValueError("Qwen is configured through transformers, not HTTP API. Use RagasEvaluator or your pipeline adapter.")
     if config.provider == "gigachat_api" or provider == "gigachat":
-        return GigaChatApiClient(config)
+        return GigaChatLangChainClient(config)
     return OpenAICompatibleClient(config)
 
 
@@ -116,3 +88,28 @@ def _message_to_dict(message: ChatMessage | dict[str, Any]) -> dict[str, Any]:
     if isinstance(message, ChatMessage):
         return asdict(message)
     return message
+
+
+def _to_langchain_message(message: ChatMessage | dict[str, Any]):
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    data = _message_to_dict(message)
+    role = data.get("role", "user")
+    content = str(data.get("content", ""))
+    if role == "system":
+        return SystemMessage(content=content)
+    if role == "assistant":
+        return AIMessage(content=content)
+    return HumanMessage(content=content)
+
+
+def _rate_limiter(config: ModelConfig):
+    if config.min_seconds_between_requests <= 0:
+        return None
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+
+    return InMemoryRateLimiter(
+        requests_per_second=1 / config.min_seconds_between_requests,
+        check_every_n_seconds=0.1,
+        max_bucket_size=1,
+    )

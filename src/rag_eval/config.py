@@ -26,6 +26,14 @@ class PipelineConfig:
 
 
 @dataclass(slots=True)
+class RetrieverAdapterConfig:
+    init_args: list[Any] = field(default_factory=list)
+    init_kwargs: dict[str, Any] = field(default_factory=dict)
+    search_kwargs: dict[str, Any] = field(default_factory=dict)
+    top_k: int = 10
+
+
+@dataclass(slots=True)
 class RunConfig:
     max_questions: int | None = None
     sleep_seconds: float = 0
@@ -55,18 +63,18 @@ class ModelConfig:
     model: str
     base_url: str = ""
     provider: str = "openai_compatible"
+    access_token: str = ""
     api_key_env: str = ""
     auth_type: str = "none"
-    token_url: str = ""
-    credentials_env: str = ""
-    scope: str = "GIGACHAT_API_PERS"
     timeout_seconds: int = 60
     temperature: float = 0
     verify_ssl: bool = True
+    min_seconds_between_requests: float = 0
     task: str = "text-generation"
     device: int | None = None
     device_map: str | None = "auto"
     torch_dtype: str = "auto"
+    local_files_only: bool = False
     max_new_tokens: int = 1024
     do_sample: bool = False
     return_full_text: bool = False
@@ -77,6 +85,7 @@ class AppConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
     golden_columns: GoldenColumnsConfig = field(default_factory=GoldenColumnsConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    retriever_adapter: RetrieverAdapterConfig = field(default_factory=RetrieverAdapterConfig)
     run: RunConfig = field(default_factory=RunConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
@@ -113,13 +122,22 @@ class AppConfig:
         paths = _paths(raw.get("paths", {}), base_path)
         columns = _dataclass_from_dict(GoldenColumnsConfig, raw.get("golden_columns", {}))
         pipeline = _dataclass_from_dict(PipelineConfig, raw.get("pipeline", {}))
+        retriever_adapter = _retriever_adapter(raw.get("retriever_adapter", {}), base_path)
         run = _dataclass_from_dict(RunConfig, raw.get("run", {}))
         metrics = _dataclass_from_dict(MetricsConfig, raw.get("metrics", {}))
         models = {
             name: _dataclass_from_dict(ModelConfig, value)
             for name, value in (raw.get("models") or {}).items()
         }
-        return cls(paths=paths, golden_columns=columns, pipeline=pipeline, run=run, metrics=metrics, models=models)
+        return cls(
+            paths=paths,
+            golden_columns=columns,
+            pipeline=pipeline,
+            retriever_adapter=retriever_adapter,
+            run=run,
+            metrics=metrics,
+            models=models,
+        )
 
 def _dataclass_from_dict(class_: type, values: dict[str, Any]):
     allowed = set(class_.__dataclass_fields__.keys())
@@ -132,6 +150,7 @@ def _has_flat_config(module: Any) -> bool:
         for name in (
             "GOLDEN_QUESTIONS_PATH",
             "PIPELINE_FACTORY",
+            "RETRIEVER_INIT_KWARGS",
             "QWEN_MODEL_PATH",
             "GIGACHAT_BASE_URL",
             "RAGAS_JUDGE_PROVIDER",
@@ -154,6 +173,12 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "pipeline": {
             "factory": getattr(module, "PIPELINE_FACTORY", ""),
         },
+        "retriever_adapter": {
+            "init_args": getattr(module, "RETRIEVER_INIT_ARGS", []),
+            "init_kwargs": getattr(module, "RETRIEVER_INIT_KWARGS", {}),
+            "search_kwargs": getattr(module, "RETRIEVER_SEARCH_KWARGS", {}),
+            "top_k": getattr(module, "RETRIEVER_TOP_K", 10),
+        },
         "run": {
             "max_questions": getattr(module, "MAX_QUESTIONS", None),
             "sleep_seconds": getattr(module, "SLEEP_SECONDS", 0),
@@ -175,7 +200,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "models": {
             "qwen": {
                 "provider": getattr(module, "QWEN_PROVIDER", "qwen_transformers"),
-                "model": getattr(module, "QWEN_MODEL_PATH", getattr(module, "QWEN_MODEL", "Qwen/Qwen3-8B")),
+                "model": getattr(module, "QWEN_MODEL_PATH", getattr(module, "QWEN_MODEL", "models/Qwen3-14B")),
                 "auth_type": "none",
                 "timeout_seconds": getattr(module, "QWEN_TIMEOUT_SECONDS", 60),
                 "temperature": getattr(module, "QWEN_TEMPERATURE", 0),
@@ -183,22 +208,22 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "device": getattr(module, "QWEN_DEVICE", None),
                 "device_map": getattr(module, "QWEN_DEVICE_MAP", "auto"),
                 "torch_dtype": getattr(module, "QWEN_TORCH_DTYPE", "auto"),
+                "local_files_only": getattr(module, "QWEN_LOCAL_FILES_ONLY", True),
                 "max_new_tokens": getattr(module, "QWEN_MAX_NEW_TOKENS", 1024),
                 "do_sample": getattr(module, "QWEN_DO_SAMPLE", False),
                 "return_full_text": getattr(module, "QWEN_RETURN_FULL_TEXT", False),
             },
             "gigachat": {
                 "provider": "gigachat_api",
-                "base_url": getattr(module, "GIGACHAT_BASE_URL", "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"),
+                "base_url": getattr(
+                    module,
+                    "GIGACHAT_BASE_URL",
+                    "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+                ),
+                "access_token": getattr(module, "GIGACHAT_ACCESS_TOKEN", ""),
                 "model": getattr(module, "GIGACHAT_MODEL", "GigaChat"),
-                "auth_type": getattr(module, "GIGACHAT_AUTH_TYPE", "bearer_env"),
-                "api_key_env": getattr(module, "GIGACHAT_API_KEY_ENV", "GIGACHAT_API_KEY"),
-                "token_url": getattr(module, "GIGACHAT_TOKEN_URL", "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"),
-                "credentials_env": getattr(module, "GIGACHAT_CREDENTIALS_ENV", "GIGACHAT_CREDENTIALS"),
-                "scope": getattr(module, "GIGACHAT_SCOPE", "GIGACHAT_API_PERS"),
-                "timeout_seconds": getattr(module, "GIGACHAT_TIMEOUT_SECONDS", 60),
                 "temperature": getattr(module, "GIGACHAT_TEMPERATURE", 0),
-                "verify_ssl": getattr(module, "GIGACHAT_VERIFY_SSL", True),
+                "min_seconds_between_requests": getattr(module, "GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS", 10),
             },
         },
     }
@@ -217,6 +242,15 @@ def _paths(values: dict[str, Any], base_dir: Path) -> PathsConfig:
         run_outputs_dir=_resolve(base_dir, raw["run_outputs_dir"]),
         metrics_outputs_dir=_resolve(base_dir, raw["metrics_outputs_dir"]),
         summary_metrics_file=_resolve(base_dir, raw["summary_metrics_file"]),
+    )
+
+
+def _retriever_adapter(values: dict[str, Any], base_dir: Path) -> RetrieverAdapterConfig:
+    return RetrieverAdapterConfig(
+        init_args=list(values.get("init_args") or []),
+        init_kwargs=dict(values.get("init_kwargs") or {}),
+        search_kwargs=dict(values.get("search_kwargs") or {}),
+        top_k=int(values.get("top_k", 10)),
     )
 
 

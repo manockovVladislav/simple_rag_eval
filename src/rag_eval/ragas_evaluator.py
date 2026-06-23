@@ -8,7 +8,6 @@ import pandas as pd
 
 from rag_eval.config import AppConfig, ModelConfig
 from rag_eval.io import contexts_from_json
-from rag_eval.llm_clients import GigaChatApiClient
 
 
 @dataclass(slots=True)
@@ -21,6 +20,7 @@ class RagasEvaluationRow:
 class RagasEvaluator:
     def __init__(self, config: AppConfig):
         self.config = config
+        self._langchain_llm = None
 
     def evaluate_rows(self, frame: pd.DataFrame) -> list[RagasEvaluationRow]:
         self._ensure_ragas_installed()
@@ -35,7 +35,7 @@ class RagasEvaluator:
         errors: list[str] = []
 
         for source in ("retriever", "reranker"):
-            sample = self._make_sample(row, source)
+            sample = self._make_context_sample(row, source)
             if sample is None:
                 continue
             metrics = self._context_metrics_for_sample(sample)
@@ -47,7 +47,7 @@ class RagasEvaluator:
             except Exception as exc:
                 errors.append(f"{source}: {type(exc).__name__}: {exc}")
 
-        answer_sample = self._make_sample(row, self.config.metrics.ragas_context_source, fallback=True)
+        answer_sample = self._make_answer_sample(row, self.config.metrics.ragas_context_source, fallback=True)
         if answer_sample is not None:
             metrics = self._answer_metrics_for_sample(answer_sample)
             if metrics:
@@ -90,7 +90,20 @@ class RagasEvaluator:
             for metric in metrics
         }
 
-    def _make_sample(self, row: pd.Series, source: str, fallback: bool = False) -> dict[str, Any] | None:
+    def _make_context_sample(self, row: pd.Series, source: str) -> dict[str, Any] | None:
+        question = _clean_text(row.get("question"))
+        contexts = self._contexts(row, source, fallback=False)
+        reference = _clean_text(row.get("expected_answer"))
+        if not question or not contexts or not reference:
+            return None
+        return {
+            "user_input": question,
+            "response": reference,
+            "retrieved_contexts": contexts,
+            "reference": reference,
+        }
+
+    def _make_answer_sample(self, row: pd.Series, source: str, fallback: bool = False) -> dict[str, Any] | None:
         question = _clean_text(row.get("question"))
         answer = _clean_text(row.get("answer"))
         contexts = self._contexts(row, source, fallback)
@@ -139,13 +152,20 @@ class RagasEvaluator:
         return metrics
 
     def _make_langchain_llm(self):
+        if self._langchain_llm is not None:
+            return self._langchain_llm
+
         provider = self.config.metrics.ragas_judge_provider
         if provider not in self.config.models:
             raise ValueError(f"Ragas judge provider '{provider}' is not configured.")
         model_config = self.config.models[provider]
         if model_config.provider == "qwen_transformers":
-            return _make_transformers_llm(model_config)
-        return _make_openai_compatible_llm(model_config)
+            self._langchain_llm = _make_transformers_llm(model_config)
+        elif model_config.provider == "gigachat_api" or provider == "gigachat":
+            self._langchain_llm = _make_gigachat_langchain_llm(model_config)
+        else:
+            self._langchain_llm = _make_openai_compatible_llm(model_config)
+        return self._langchain_llm
 
     def _ensure_ragas_installed(self) -> None:
         try:
@@ -168,6 +188,21 @@ def _make_openai_compatible_llm(model_config: ModelConfig):
     )
 
 
+def _make_gigachat_langchain_llm(model_config: ModelConfig):
+    try:
+        from langchain_gigachat.chat_models import GigaChat
+    except ImportError:
+        from langchain_community.chat_models.gigachat import GigaChat
+
+    return GigaChat(
+        base_url=model_config.base_url,
+        access_token=model_config.access_token,
+        model=model_config.model,
+        temperature=model_config.temperature,
+        rate_limiter=_rate_limiter(model_config),
+    )
+
+
 def _make_transformers_llm(model_config: ModelConfig):
     from langchain_community.llms import HuggingFacePipeline
 
@@ -176,6 +211,8 @@ def _make_transformers_llm(model_config: ModelConfig):
         model_kwargs["device_map"] = model_config.device_map
     if model_config.torch_dtype:
         model_kwargs["torch_dtype"] = model_config.torch_dtype
+    if model_config.local_files_only:
+        model_kwargs["local_files_only"] = True
 
     pipeline_kwargs = {
         "max_new_tokens": model_config.max_new_tokens,
@@ -196,11 +233,21 @@ def _make_transformers_llm(model_config: ModelConfig):
     return HuggingFacePipeline.from_model_id(**kwargs)
 
 
+def _rate_limiter(model_config: ModelConfig):
+    if model_config.min_seconds_between_requests <= 0:
+        return None
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+
+    return InMemoryRateLimiter(
+        requests_per_second=1 / model_config.min_seconds_between_requests,
+        check_every_n_seconds=0.1,
+        max_bucket_size=1,
+    )
+
+
 def _api_key(config: ModelConfig) -> str:
     if config.provider == "qwen_local" or config.auth_type == "none":
         return "EMPTY"
-    if config.provider == "gigachat_api":
-        return GigaChatApiClient(config).get_bearer_token()
     if config.auth_type == "bearer_env" and config.api_key_env:
         return os.getenv(config.api_key_env, "")
     return "EMPTY"
