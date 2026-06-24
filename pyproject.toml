@@ -19,6 +19,7 @@ dependencies = [
     "ragas>=0.4.0",
     "requests>=2.31.0",
     "sentence-transformers>=3.0.0",
+    "tqdm>=4.67.0",
     "transformers>=4.40.0",
 ]
 

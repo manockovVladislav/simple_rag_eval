@@ -12,12 +12,15 @@ class PathsConfig:
     run_outputs_dir: Path = Path("outputs/runs")
     metrics_outputs_dir: Path = Path("outputs/metrics")
     summary_metrics_file: Path = Path("outputs/metrics/metrics_summary.xlsx")
+    log_file: Path = Path("outputs/logs/rag_eval.log")
 
 
 @dataclass(slots=True)
 class GoldenColumnsConfig:
     question: str = "question"
     expected_answer: str = "expected_answer"
+    ground_truth: str = "ground_truth"
+    chunk_id: str = "chunk_id"
 
 
 @dataclass(slots=True)
@@ -40,6 +43,18 @@ class RunConfig:
 
 
 @dataclass(slots=True)
+class GenerationConfig:
+    enabled: bool = True
+    provider: str = "qwen"
+    context_source: str = "reranker"
+    max_contexts: int = 10
+    system_prompt: str = (
+        "Ты отвечаешь на вопрос только по переданному контексту. "
+        "Если в контексте нет ответа, так и скажи."
+    )
+
+
+@dataclass(slots=True)
 class MetricsConfig:
     answer_enabled: bool = True
     ragas_enabled: bool = True
@@ -48,12 +63,13 @@ class MetricsConfig:
     ragas_timeout_seconds: int = 60
     ragas_max_workers: int = 1
     ragas_max_retries: int = 0
+    retrieval_k_values: list[int] = field(default_factory=lambda: [1, 3, 5, 10])
     ragas_metrics: list[str] = field(
         default_factory=lambda: [
             "faithfulness",
-            "context_precision",
-            "context_recall",
             "answer_correctness",
+            "answer_relevancy",
+            "answer_similarity",
         ]
     )
 
@@ -87,6 +103,7 @@ class AppConfig:
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     retriever_adapter: RetrieverAdapterConfig = field(default_factory=RetrieverAdapterConfig)
     run: RunConfig = field(default_factory=RunConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
 
@@ -124,6 +141,7 @@ class AppConfig:
         pipeline = _dataclass_from_dict(PipelineConfig, raw.get("pipeline", {}))
         retriever_adapter = _retriever_adapter(raw.get("retriever_adapter", {}), base_path)
         run = _dataclass_from_dict(RunConfig, raw.get("run", {}))
+        generation = _dataclass_from_dict(GenerationConfig, raw.get("generation", {}))
         metrics = _dataclass_from_dict(MetricsConfig, raw.get("metrics", {}))
         models = {
             name: _dataclass_from_dict(ModelConfig, value)
@@ -135,6 +153,7 @@ class AppConfig:
             pipeline=pipeline,
             retriever_adapter=retriever_adapter,
             run=run,
+            generation=generation,
             metrics=metrics,
             models=models,
         )
@@ -165,10 +184,13 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "run_outputs_dir": getattr(module, "RUN_OUTPUTS_DIR", "outputs/runs"),
             "metrics_outputs_dir": getattr(module, "METRICS_OUTPUTS_DIR", "outputs/metrics"),
             "summary_metrics_file": getattr(module, "SUMMARY_METRICS_FILE", "outputs/metrics/metrics_summary.xlsx"),
+            "log_file": getattr(module, "LOG_FILE", "outputs/logs/rag_eval.log"),
         },
         "golden_columns": {
             "question": getattr(module, "QUESTION_COLUMN", "question"),
             "expected_answer": getattr(module, "EXPECTED_ANSWER_COLUMN", "expected_answer"),
+            "ground_truth": getattr(module, "GROUND_TRUTH_COLUMN", "ground_truth"),
+            "chunk_id": getattr(module, "CHUNK_ID_COLUMN", "chunk_id"),
         },
         "pipeline": {
             "factory": getattr(module, "PIPELINE_FACTORY", ""),
@@ -183,6 +205,17 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "max_questions": getattr(module, "MAX_QUESTIONS", None),
             "sleep_seconds": getattr(module, "SLEEP_SECONDS", 0),
         },
+        "generation": {
+            "enabled": getattr(module, "RAG_ANSWER_ENABLED", True),
+            "provider": getattr(module, "RAG_LLM_PROVIDER", "qwen"),
+            "context_source": getattr(module, "RAG_CONTEXT_SOURCE", "reranker"),
+            "max_contexts": getattr(module, "RAG_MAX_CONTEXTS", 10),
+            "system_prompt": getattr(
+                module,
+                "RAG_SYSTEM_PROMPT",
+                GenerationConfig().system_prompt,
+            ),
+        },
         "metrics": {
             "answer_enabled": getattr(module, "ANSWER_METRICS_ENABLED", True),
             "ragas_enabled": getattr(module, "RAGAS_ENABLED", True),
@@ -191,10 +224,11 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "ragas_timeout_seconds": getattr(module, "RAGAS_TIMEOUT_SECONDS", 60),
             "ragas_max_workers": getattr(module, "RAGAS_MAX_WORKERS", 1),
             "ragas_max_retries": getattr(module, "RAGAS_MAX_RETRIES", 0),
+            "retrieval_k_values": getattr(module, "RETRIEVAL_K_VALUES", [1, 3, 5, 10]),
             "ragas_metrics": getattr(
                 module,
                 "RAGAS_METRICS",
-                ["faithfulness", "context_precision", "context_recall", "answer_correctness"],
+                ["faithfulness", "answer_correctness", "answer_relevancy", "answer_similarity"],
             ),
         },
         "models": {
@@ -236,12 +270,14 @@ def _paths(values: dict[str, Any], base_dir: Path) -> PathsConfig:
         "run_outputs_dir": values.get("run_outputs_dir", config.run_outputs_dir),
         "metrics_outputs_dir": values.get("metrics_outputs_dir", config.metrics_outputs_dir),
         "summary_metrics_file": values.get("summary_metrics_file", config.summary_metrics_file),
+        "log_file": values.get("log_file", config.log_file),
     }
     return PathsConfig(
         golden_questions=_resolve(base_dir, raw["golden_questions"]),
         run_outputs_dir=_resolve(base_dir, raw["run_outputs_dir"]),
         metrics_outputs_dir=_resolve(base_dir, raw["metrics_outputs_dir"]),
         summary_metrics_file=_resolve(base_dir, raw["summary_metrics_file"]),
+        log_file=_resolve(base_dir, raw["log_file"]),
     )
 
 

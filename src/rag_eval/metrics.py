@@ -8,8 +8,15 @@ import pandas as pd
 
 from rag_eval.config import AppConfig
 from rag_eval.io import append_xlsx_rows, read_table
+from rag_eval.logging_utils import setup_file_logger
 from rag_eval.ragas_evaluator import RagasEvaluator
+from rag_eval.retrieval_metrics import context_chunk_ids, parse_relevant_chunk_ids, retrieval_metrics_for_ids
 from rag_eval.text_metrics import contains_expected, exact_match, token_f1
+
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover
+    tqdm = lambda value, **_: value
 
 
 class MetricsCalculator:
@@ -25,9 +32,12 @@ class MetricsCalculator:
         return self.evaluate(run_file)
 
     def evaluate(self, run_file: str | Path) -> Path:
+        logger = setup_file_logger(self.config.paths.log_file)
         run_path = Path(run_file)
         frame = read_table(run_path)
-        detail_rows = [self._row_metrics(row) for _, row in frame.iterrows()]
+        logger.info("metrics_started run_file=%s rows=%s", run_path, len(frame))
+        iterator = tqdm(frame.iterrows(), total=len(frame), desc="Calculating metrics")
+        detail_rows = [self._row_metrics(row) for _, row in iterator]
         if self.config.metrics.ragas_enabled:
             self._add_ragas_metrics(frame, detail_rows)
         details = pd.DataFrame(detail_rows)
@@ -53,6 +63,7 @@ class MetricsCalculator:
             leading_columns=["created_at", "run_file", "question_id", "question"],
             leading_prefixes=["ragas_"],
         )
+        logger.info("metrics_finished output=%s", summary_path)
         return summary_path
 
     def latest_run_file(self) -> Path:
@@ -67,13 +78,36 @@ class MetricsCalculator:
             "question": row.get("question"),
             "has_error": bool(row.get("error")) if not pd.isna(row.get("error")) else False,
         }
-        expected_answer = row.get("expected_answer")
+        expected_answer = row.get("ground_truth")
+        if not _has_text(expected_answer):
+            expected_answer = row.get("expected_answer")
         answer = row.get("answer")
         if self.config.metrics.answer_enabled and _has_text(expected_answer) and _has_text(answer):
             result["answer_exact_match"] = exact_match(expected_answer, answer)
             result["answer_contains_expected"] = contains_expected(expected_answer, answer)
             result["answer_token_f1"] = token_f1(expected_answer, answer)
+        result.update(self._retrieval_metrics(row))
         return result
+
+    def _retrieval_metrics(self, row: pd.Series) -> dict[str, Any]:
+        relevant_ids = parse_relevant_chunk_ids(row.get("relevant_chunk_ids"))
+        if not relevant_ids:
+            return {}
+
+        metrics: dict[str, Any] = {
+            "relevant_chunk_count": len(set(relevant_ids)),
+        }
+        for source in ("retriever", "reranker"):
+            column = f"{source}_contexts"
+            ids = context_chunk_ids(row.get(column))
+            source_metrics = retrieval_metrics_for_ids(
+                ids,
+                relevant_ids,
+                self.config.metrics.retrieval_k_values,
+            )
+            metrics[f"{source}_retrieved_chunk_ids"] = ";".join(item for item in ids if item)
+            metrics.update({f"{source}_{key}": value for key, value in source_metrics.items()})
+        return metrics
 
     def _add_ragas_metrics(self, frame: pd.DataFrame, detail_rows: list[dict[str, Any]]) -> None:
         ragas_results = RagasEvaluator(self.config).evaluate_rows(frame)

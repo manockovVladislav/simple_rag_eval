@@ -1,0 +1,12 @@
+pandas==3.0.1
+openpyxl==3.1.5
+requests==2.32.5
+tqdm==4.67.1
+ragas==0.4.3
+datasets==4.6.1
+langchain-openai==0.3.35
+langchain-community==0.3.31
+langchain-gigachat==0.3.12
+transformers==5.3.0
+sentence-transformers==5.2.3
+bm25s==0.2.0

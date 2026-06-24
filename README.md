@@ -1,13 +1,15 @@
 # Local RAG Eval
 
-Локальная система проверки retriever / reranker в закрытом контуре.
+Локальная система проверки retriever / reranker и финального RAG-ответа в закрытом контуре.
 
 Что делает:
 
 1. Читает вопросы из `data/golden_questions.xlsx`.
 2. Запускает выбранный pipeline из `config.py`.
-3. Сохраняет ответы и контексты в `outputs/runs/rag_run_*.xlsx`.
-4. Считает метрики и дописывает результат в `outputs/metrics/metrics_summary.xlsx`.
+3. После retriever/reranker отправляет контекст в выбранную RAG LLM и сохраняет ответ.
+4. Сохраняет ответы и контексты в `outputs/runs/rag_run_*.xlsx`.
+5. Считает top-k метрики по размеченным chunk id и judge-метрики по финальному ответу.
+6. Дописывает результат в `outputs/metrics/metrics_summary.xlsx`.
 
 ## Установка
 
@@ -28,13 +30,22 @@ data/golden_questions.xlsx
 Минимальные колонки:
 
 - `question` - вопрос.
-- `expected_answer` - эталонный ответ для Ragas/context метрик.
+- `ground_truth` - эталонный ответ для проверки финального ответа.
+
+Опциональная колонка для retrieval-метрик:
+
+- `chunk_id` - один или несколько релевантных chunk id через `;`, `,`, `|` или JSON-list.
+
+Если `chunk_id` заполнен, система считает top-k метрики для `retriever_contexts` и `reranker_contexts`.
+Если `chunk_id` не заполнен, retrieval-метрики пропускаются, а judge продолжает оценивать финальный ответ.
+Для совместимости старое имя `expected_answer` остается fallback для `ground_truth`.
 
 Названия колонок меняются в `config.py`:
 
 ```python
 QUESTION_COLUMN = "question"
-EXPECTED_ANSWER_COLUMN = "expected_answer"
+GROUND_TRUTH_COLUMN = "ground_truth"
+CHUNK_ID_COLUMN = "chunk_id"
 ```
 
 ## Два Ретривера
@@ -93,6 +104,22 @@ RETRIEVER_TOP_K = 10
 
 - без `self.reranker` для `retriever_contexts`;
 - со штатным `self.reranker` для `reranker_contexts`.
+
+После этого система берет контексты из `RAG_CONTEXT_SOURCE` (`reranker` по умолчанию, fallback на `retriever`)
+и отправляет их в модель из `RAG_LLM_PROVIDER`.
+
+```python
+RAG_ANSWER_ENABLED = True
+RAG_LLM_PROVIDER = "qwen"
+RAG_CONTEXT_SOURCE = "reranker"
+RAG_MAX_CONTEXTS = 10
+```
+
+Судья настраивается отдельно:
+
+```python
+RAGAS_JUDGE_PROVIDER = "qwen"
+```
 
 ## Qwen И GigaChat
 
@@ -207,14 +234,30 @@ outputs/metrics/metrics_summary.xlsx
 
 Основные метрики:
 
-- `ragas_retriever_context_precision`
-- `ragas_retriever_context_recall`
-- `ragas_reranker_context_precision`
-- `ragas_reranker_context_recall`
+- `retriever_hit_rate_at_10`
+- `retriever_recall_at_10`
+- `retriever_precision_at_10`
+- `retriever_mrr_at_10`
+- `retriever_ndcg_at_10`
+- `reranker_hit_rate_at_10`
+- `reranker_recall_at_10`
+- `reranker_precision_at_10`
+- `reranker_mrr_at_10`
+- `reranker_ndcg_at_10`
 - `ragas_faithfulness`
 - `ragas_answer_correctness`
+- `ragas_answer_relevancy`
+- `ragas_answer_similarity`
 - `answer_exact_match`
 - `answer_contains_expected`
 - `answer_token_f1`
 
-Если pipeline не генерирует answer, answer-метрики пропускаются. Context-метрики считаются по `question`, `expected_answer` и найденным контекстам.
+Если в golden-файле нет `chunk_id`, retrieval-метрики пропускаются. Судья оценивает только финальный `answer`.
+
+Подробный лог пишется в:
+
+```text
+outputs/logs/rag_eval.log
+```
+
+Туда попадают вопрос, найденные контексты, запрос к RAG LLM, ответ модели и результаты judge-метрик.

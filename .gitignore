@@ -7,3 +7,4 @@ venv/
 retriver_gr_oaofr/*
 outputs/metrics/*
 outputs/runs/*
+outputs/logs/*

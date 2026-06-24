@@ -3,10 +3,13 @@ GOLDEN_QUESTIONS_PATH = "data/golden_questions.xlsx"
 RUN_OUTPUTS_DIR = "outputs/runs"
 METRICS_OUTPUTS_DIR = "outputs/metrics"
 SUMMARY_METRICS_FILE = "outputs/metrics/metrics_summary.xlsx"
+LOG_FILE = "outputs/logs/rag_eval.log"
 
 # Колонки в golden-файле
 QUESTION_COLUMN = "question"
-EXPECTED_ANSWER_COLUMN = "expected_answer"
+GROUND_TRUTH_COLUMN = "ground_truth"
+EXPECTED_ANSWER_COLUMN = "expected_answer"  # fallback для старых файлов
+CHUNK_ID_COLUMN = "chunk_id"
 
 # Какой pipeline запускать.
 #
@@ -56,10 +59,24 @@ RETRIEVER_TOP_K = 10
 MAX_QUESTIONS = None
 SLEEP_SECONDS = 0
 
+# Генерация финального RAG-ответа после retriever/reranker.
+#
+# RAG_LLM_PROVIDER и RAGAS_JUDGE_PROVIDER можно выставлять независимо:
+# например, RAG_LLM_PROVIDER = "gigachat", RAGAS_JUDGE_PROVIDER = "qwen".
+RAG_ANSWER_ENABLED = True
+RAG_LLM_PROVIDER = "qwen"
+RAG_CONTEXT_SOURCE = "reranker"
+RAG_MAX_CONTEXTS = 10
+RAG_SYSTEM_PROMPT = (
+    "Ты отвечаешь на вопрос только по переданному контексту. "
+    "Если в контексте нет ответа, так и скажи."
+)
+
 # Локальные answer-метрики без LLM-судьи
 ANSWER_METRICS_ENABLED = True
+RETRIEVAL_K_VALUES = [1, 3, 5, 10]
 
-# Ragas LLM-судья.
+# Ragas LLM-судья для финального ответа.
 #
 # qwen: локальный Qwen3-14B через transformers.
 # gigachat: GigaChat через LangChain ChatModel.
@@ -71,9 +88,9 @@ RAGAS_MAX_WORKERS = 1
 RAGAS_MAX_RETRIES = 0
 RAGAS_METRICS = [
     "faithfulness",
-    "context_precision",
-    "context_recall",
     "answer_correctness",
+    "answer_relevancy",
+    "answer_similarity",
 ]
 
 # Локальный Qwen через transformers.

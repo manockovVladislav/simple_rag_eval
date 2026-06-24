@@ -8,6 +8,12 @@ import pandas as pd
 
 from rag_eval.config import AppConfig, ModelConfig
 from rag_eval.io import contexts_from_json
+from rag_eval.logging_utils import setup_file_logger
+
+try:
+    from tqdm.auto import tqdm
+except ImportError:  # pragma: no cover
+    tqdm = lambda value, **_: value
 
 
 @dataclass(slots=True)
@@ -25,30 +31,28 @@ class RagasEvaluator:
     def evaluate_rows(self, frame: pd.DataFrame) -> list[RagasEvaluationRow]:
         self._ensure_ragas_installed()
         results: list[RagasEvaluationRow] = []
-        for _, row in frame.iterrows():
-            results.append(self._evaluate_row(row))
+        logger = setup_file_logger(self.config.paths.log_file)
+        iterator = tqdm(frame.iterrows(), total=len(frame), desc="Running judge")
+        for _, row in iterator:
+            result = self._evaluate_row(row)
+            logger.info(
+                "judge_result question_id=%s metrics=%s error=%s",
+                result.question_id,
+                result.metrics,
+                result.error,
+            )
+            results.append(result)
         return results
 
     def _evaluate_row(self, row: pd.Series) -> RagasEvaluationRow:
+        logger = setup_file_logger(self.config.paths.log_file)
         question_id = row.get("question_id")
         all_metrics: dict[str, float | None] = {}
         errors: list[str] = []
 
-        for source in ("retriever", "reranker"):
-            sample = self._make_context_sample(row, source)
-            if sample is None:
-                continue
-            metrics = self._context_metrics_for_sample(sample)
-            if not metrics:
-                continue
-            try:
-                values = self._evaluate_one(sample, metrics)
-                all_metrics.update({f"ragas_{source}_{key}": value for key, value in values.items()})
-            except Exception as exc:
-                errors.append(f"{source}: {type(exc).__name__}: {exc}")
-
         answer_sample = self._make_answer_sample(row, self.config.metrics.ragas_context_source, fallback=True)
         if answer_sample is not None:
+            logger.info("judge_request question_id=%s sample=%s", question_id, answer_sample)
             metrics = self._answer_metrics_for_sample(answer_sample)
             if metrics:
                 try:
@@ -90,25 +94,12 @@ class RagasEvaluator:
             for metric in metrics
         }
 
-    def _make_context_sample(self, row: pd.Series, source: str) -> dict[str, Any] | None:
-        question = _clean_text(row.get("question"))
-        contexts = self._contexts(row, source, fallback=False)
-        reference = _clean_text(row.get("expected_answer"))
-        if not question or not contexts or not reference:
-            return None
-        return {
-            "user_input": question,
-            "response": reference,
-            "retrieved_contexts": contexts,
-            "reference": reference,
-        }
-
     def _make_answer_sample(self, row: pd.Series, source: str, fallback: bool = False) -> dict[str, Any] | None:
         question = _clean_text(row.get("question"))
         answer = _clean_text(row.get("answer"))
         contexts = self._contexts(row, source, fallback)
-        reference = _clean_text(row.get("expected_answer"))
-        if not question or not answer or not contexts:
+        reference = _clean_text(row.get("ground_truth")) or _clean_text(row.get("expected_answer"))
+        if not question or not answer:
             return None
         sample = {
             "user_input": question,
@@ -127,28 +118,19 @@ class RagasEvaluator:
             return contexts
         return _context_texts(row.get(fallback_column))
 
-    def _context_metrics_for_sample(self, sample: dict[str, Any]) -> list[Any]:
-        from ragas.metrics import context_precision, context_recall
-
-        configured = set(self.config.metrics.ragas_metrics)
-        metrics: list[Any] = []
-        if "reference" in sample:
-            if "context_precision" in configured:
-                metrics.append(context_precision)
-            if "context_recall" in configured:
-                metrics.append(context_recall)
-        return metrics
-
     def _answer_metrics_for_sample(self, sample: dict[str, Any]) -> list[Any]:
-        from ragas.metrics import answer_correctness, faithfulness
-
         configured = set(self.config.metrics.ragas_metrics)
         metrics: list[Any] = []
-        if "faithfulness" in configured:
-            metrics.append(faithfulness)
-        if "reference" in sample:
-            if "answer_correctness" in configured:
-                metrics.append(answer_correctness)
+        has_reference = "reference" in sample
+        has_contexts = bool(sample.get("retrieved_contexts"))
+        if "faithfulness" in configured and has_contexts:
+            metrics.append(_ragas_metric("faithfulness"))
+        if "answer_correctness" in configured and has_reference:
+            metrics.append(_ragas_metric("answer_correctness"))
+        if "answer_relevancy" in configured:
+            metrics.append(_ragas_metric("answer_relevancy"))
+        if "answer_similarity" in configured and has_reference:
+            metrics.append(_ragas_metric("answer_similarity"))
         return metrics
 
     def _make_langchain_llm(self):
@@ -256,6 +238,15 @@ def _api_key(config: ModelConfig) -> str:
 def _openai_base_url(value: str) -> str:
     suffix = "/chat/completions"
     return value[: -len(suffix)] if value.endswith(suffix) else value
+
+
+def _ragas_metric(name: str):
+    import ragas.metrics as ragas_metrics
+
+    try:
+        return getattr(ragas_metrics, name)
+    except AttributeError as exc:
+        raise ValueError(f"Ragas metric '{name}' is not available in installed ragas.") from exc
 
 
 def _context_texts(value: Any) -> list[str]:
