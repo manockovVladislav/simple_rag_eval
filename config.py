@@ -16,14 +16,14 @@ CHUNK_ID_COLUMN = "chunk_id"
 # 1. Демо-проверка тестовой системы без внешнего ретривера:
 PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 #
-# 2. Твой файл retriver_gr_oaofr/retriver/hibrid_retriver_all_formulas.py
+# 2. Твой файл oaofr_assistant_gr/retrivers/hybrid_retriever_new_all_formulas.py
 #    Только retriever, без reranker. Результаты попадут в retriever_contexts.
-# PIPELINE_FACTORY = "rag_eval.retriver_gr_oaofr_pipeline:create_retriever_pipeline"
+# PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_retriever_pipeline"
 #
-# 3. Твой файл retriver_gr_oaofr/retriver/hibrid_retriver_all_formulas_and_reranker.py
+# 3. Твой файл oaofr_assistant_gr/retrivers/hybrid_retriever_new_all_formulas_and_reranker.py
 #    Retriever + reranker. Результаты retriever попадут в retriever_contexts,
 #    результаты reranker попадут в reranker_contexts.
-# PIPELINE_FACTORY = "rag_eval.retriver_gr_oaofr_pipeline:create_reranker_pipeline"
+# PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_reranker_pipeline"
 
 # Параметры создания твоих классов.
 #
@@ -35,8 +35,8 @@ PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 # - reranker: True/False только для класса retriever + reranker.
 RETRIEVER_INIT_ARGS = []
 RETRIEVER_INIT_KWARGS = {
-    # "faiss_path": "retriver_gr_oaofr/vectors/index.faiss",
-    # "pkl_path": "retriver_gr_oaofr/vectors/corpus.pkl",
+    # "faiss_path": "oaofr_assistant_gr/vectors/index.faiss",
+    # "pkl_path": "oaofr_assistant_gr/vectors/corpus.pkl",
     # "model_name": "bge-m3",
     # "fusion_method": "rrf",
     # "reranker": True,

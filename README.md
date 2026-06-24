@@ -50,12 +50,12 @@ CHUNK_ID_COLUMN = "chunk_id"
 
 ## Два Ретривера
 
-Внешний репозиторий `retriver_gr_oaofr` клонируется в корень проекта. Его код не меняем.
+Внешний репозиторий `oaofr_assistant_gr` клонируется в корень проекта. Его код не меняем.
 
 Обертки для тестовой системы лежат здесь:
 
 ```text
-src/rag_eval/retriver_gr_oaofr_pipeline.py
+src/rag_eval/oaofr_assistant_pipeline.py
 ```
 
 Там два класса:
@@ -73,24 +73,24 @@ src/rag_eval/retriver_gr_oaofr_pipeline.py
 PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 ```
 
-Для файла `hibrid_retriver_all_formulas.py`:
+Для файла `hybrid_retriever_new_all_formulas.py`:
 
 ```python
-PIPELINE_FACTORY = "rag_eval.retriver_gr_oaofr_pipeline:create_retriever_pipeline"
+PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_retriever_pipeline"
 ```
 
-Для файла `hibrid_retriver_all_formulas_and_reranker.py`:
+Для файла `hybrid_retriever_new_all_formulas_and_reranker.py`:
 
 ```python
-PIPELINE_FACTORY = "rag_eval.retriver_gr_oaofr_pipeline:create_reranker_pipeline"
+PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_reranker_pipeline"
 ```
 
 Параметры создания класса добавляются в `RETRIEVER_INIT_KWARGS`:
 
 ```python
 RETRIEVER_INIT_KWARGS = {
-    "faiss_path": "retriver_gr_oaofr/vectors/index.faiss",
-    "pkl_path": "retriver_gr_oaofr/vectors/corpus.pkl",
+    "faiss_path": "oaofr_assistant_gr/vectors/index.faiss",
+    "pkl_path": "oaofr_assistant_gr/vectors/corpus.pkl",
     "model_name": "bge-m3",
     "fusion_method": "rrf",
     "reranker": True,

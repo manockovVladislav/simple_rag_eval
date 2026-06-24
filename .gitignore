@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 venv/
 
+oaofr_assistant_gr/*
 retriver_gr_oaofr/*
 outputs/metrics/*
 outputs/runs/*
