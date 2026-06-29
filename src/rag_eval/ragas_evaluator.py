@@ -27,6 +27,7 @@ class RagasEvaluator:
     def __init__(self, config: AppConfig):
         self.config = config
         self._langchain_llm = None
+        self._langchain_embeddings = None
 
     def evaluate_rows(self, frame: pd.DataFrame) -> list[RagasEvaluationRow]:
         self._ensure_ragas_installed()
@@ -75,7 +76,8 @@ class RagasEvaluator:
         result = evaluate(
             dataset=dataset,
             metrics=metrics,
-            llm=self._make_langchain_llm(),
+            llm=self._make_langchain_llm() if _metrics_need_llm(metrics) else None,
+            embeddings=self._make_embeddings() if _metrics_need_embeddings(metrics) else None,
             run_config=RunConfig(
                 timeout=self.config.metrics.ragas_timeout_seconds,
                 max_workers=self.config.metrics.ragas_max_workers,
@@ -131,6 +133,10 @@ class RagasEvaluator:
             metrics.append(_ragas_metric("answer_relevancy"))
         if "answer_similarity" in configured and has_reference:
             metrics.append(_ragas_metric("answer_similarity"))
+        if "context_precision" in configured and has_contexts and has_reference:
+            metrics.append(_ragas_metric("context_precision"))
+        if "context_recall" in configured and has_contexts and has_reference:
+            metrics.append(_ragas_metric("context_recall"))
         return metrics
 
     def _make_langchain_llm(self):
@@ -148,6 +154,22 @@ class RagasEvaluator:
         else:
             self._langchain_llm = _make_openai_compatible_llm(model_config)
         return self._langchain_llm
+
+    def _make_embeddings(self):
+        provider = self.config.metrics.ragas_embeddings_provider
+        if not provider:
+            return None
+        if self._langchain_embeddings is not None:
+            return self._langchain_embeddings
+        if provider not in self.config.models:
+            raise ValueError(f"Ragas embeddings provider '{provider}' is not configured.")
+        model_config = self.config.models[provider]
+        if model_config.provider != "huggingface_embeddings":
+            raise ValueError(
+                f"Ragas embeddings provider '{provider}' must use provider='huggingface_embeddings'."
+            )
+        self._langchain_embeddings = _make_huggingface_embeddings(model_config)
+        return self._langchain_embeddings
 
     def _ensure_ragas_installed(self) -> None:
         try:
@@ -181,6 +203,7 @@ def _make_gigachat_langchain_llm(model_config: ModelConfig):
         access_token=model_config.access_token,
         model=model_config.model,
         temperature=model_config.temperature,
+        verify_ssl_certs=model_config.verify_ssl,
         rate_limiter=_rate_limiter(model_config),
     )
 
@@ -215,6 +238,74 @@ def _make_transformers_llm(model_config: ModelConfig):
     return HuggingFacePipeline.from_model_id(**kwargs)
 
 
+def _make_huggingface_embeddings(model_config: ModelConfig):
+    model_kwargs: dict[str, Any] = {}
+    if model_config.local_files_only:
+        model_kwargs["local_files_only"] = True
+
+    try:
+        from ragas.embeddings import HuggingFaceEmbeddings as RagasHuggingFaceEmbeddings
+
+        embeddings = RagasHuggingFaceEmbeddings(
+            model=model_config.model,
+            device=model_config.embedding_device,
+            normalize_embeddings=model_config.normalize_embeddings,
+            **model_kwargs,
+        )
+        return _SyncEmbeddingsAdapter(embeddings)
+    except ImportError:
+        pass
+
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+    except ImportError:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+
+    if model_config.embedding_device:
+        model_kwargs["device"] = model_config.embedding_device
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name=model_config.model,
+        model_kwargs=model_kwargs,
+        encode_kwargs={"normalize_embeddings": model_config.normalize_embeddings},
+        show_progress=False,
+    )
+    return _SyncEmbeddingsAdapter(embeddings)
+
+
+class _SyncEmbeddingsAdapter:
+    def __init__(self, embeddings: Any):
+        self.embeddings = embeddings
+
+    def embed_text(self, text: str) -> list[float]:
+        if hasattr(self.embeddings, "embed_text"):
+            return self.embeddings.embed_text(text)
+        return self.embeddings.embed_query(text)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    async def aembed_text(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        return self.embed_query(text)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if hasattr(self.embeddings, "embed_texts"):
+            return self.embeddings.embed_texts(texts)
+        return self.embeddings.embed_documents(texts)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_texts(texts)
+
+    async def aembed_texts(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_texts(texts)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_documents(texts)
+
+
 def _rate_limiter(model_config: ModelConfig):
     if model_config.min_seconds_between_requests <= 0:
         return None
@@ -247,6 +338,14 @@ def _ragas_metric(name: str):
         return getattr(ragas_metrics, name)
     except AttributeError as exc:
         raise ValueError(f"Ragas metric '{name}' is not available in installed ragas.") from exc
+
+
+def _metrics_need_llm(metrics: list[Any]) -> bool:
+    return any(hasattr(metric, "llm") for metric in metrics)
+
+
+def _metrics_need_embeddings(metrics: list[Any]) -> bool:
+    return any(hasattr(metric, "embeddings") for metric in metrics)
 
 
 def _context_texts(value: Any) -> list[str]:

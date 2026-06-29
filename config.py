@@ -1,3 +1,21 @@
+import os
+from pathlib import Path
+
+
+def _load_credentials(path: str = ".credentials") -> None:
+    credentials_path = Path(__file__).with_name(path)
+    if not credentials_path.exists():
+        return
+    for line in credentials_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        os.environ[key.strip()] = value.strip().strip("\"'")
+
+
+_load_credentials()
+
 # Пути
 GOLDEN_QUESTIONS_PATH = "data/golden_questions.xlsx"
 RUN_OUTPUTS_DIR = "outputs/runs"
@@ -74,24 +92,36 @@ RAG_SYSTEM_PROMPT = (
 
 # Локальные answer-метрики без LLM-судьи
 ANSWER_METRICS_ENABLED = True
-RETRIEVAL_K_VALUES = [1, 3, 5, 10]
+RETRIEVAL_K_VALUES = [5, 10]
 
 # Ragas LLM-судья для финального ответа.
 #
 # qwen: локальный Qwen3-14B через transformers.
 # gigachat: GigaChat через LangChain ChatModel.
 RAGAS_ENABLED = True
-RAGAS_JUDGE_PROVIDER = "qwen"
+RAGAS_JUDGE_PROVIDER = "gigachat"
+RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
 RAGAS_CONTEXT_SOURCE = "reranker"
-RAGAS_TIMEOUT_SECONDS = 60
+RAGAS_TIMEOUT_SECONDS = 61
 RAGAS_MAX_WORKERS = 1
 RAGAS_MAX_RETRIES = 0
 RAGAS_METRICS = [
     "faithfulness",
-    "answer_correctness",
+    # "answer_correctness",
     "answer_relevancy",
     "answer_similarity",
+    "context_precision",
+    "context_recall",
 ]
+
+# Локальные embeddings для RAGAS.
+#
+# BGE-M3 нужен метрикам RAGAS, которые считают семантическую близость
+# (например, answer_similarity/answer_relevancy и non-LLM context-метрики).
+BGE_M3_MODEL_PATH = "/home/vladislav/models/bge-m3"
+BGE_M3_LOCAL_FILES_ONLY = True
+BGE_M3_DEVICE = "cpu"
+BGE_M3_NORMALIZE_EMBEDDINGS = True
 
 # Локальный Qwen через transformers.
 #
@@ -110,16 +140,27 @@ QWEN_MAX_NEW_TOKENS = 1024
 QWEN_DO_SAMPLE = False
 QWEN_RETURN_FULL_TEXT = False
 
-# GigaChat.
-#
-# Для GigaChat передаются только эти 4 параметра:
-# base_url, access_token, model, temperature.
-GIGACHAT_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
-GIGACHAT_ACCESS_TOKEN = ""
+# --- GigaChat: текущий домашний контур ---
+# Для langchain-gigachat указывается базовый API URL, без /chat/completions.
+# GIGACHAT_ACCESS_TOKEN - это временный access_token из OAuth-ответа,
+# не Authorization key из личного кабинета.
+GIGACHAT_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
+GIGACHAT_ACCESS_TOKEN = os.getenv("GIGACHAT_ACCESS_TOKEN", "")
 GIGACHAT_MODEL = "GigaChat"
 GIGACHAT_TEMPERATURE = 0
+GIGACHAT_VERIFY_SSL = False
+
+# --- GigaChat: рабочий изолированный контур ---
+# Когда будешь запускать в рабочем контуре, закомментируй домашний блок выше
+# и раскомментируй этот блок, если там используются другие адрес/модель/токен.
+#
+# GIGACHAT_BASE_URL = ""
+# GIGACHAT_ACCESS_TOKEN = ""
+# GIGACHAT_MODEL = "GigaChat"
+# GIGACHAT_TEMPERATURE = 0
+# GIGACHAT_VERIFY_SSL = True
 
 # Ограничение тестовой системы для GigaChat-судьи.
-# Это не параметр GigaChat API. Нужно для режима 1 запрос раз в 10 секунд.
+# Это не параметр GigaChat API. Нужно для режима 1 запрос раз в 20 секунд.
 # RAGAS_MAX_WORKERS выше должен оставаться 1.
-GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 10
+GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 20

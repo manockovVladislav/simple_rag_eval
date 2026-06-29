@@ -59,6 +59,7 @@ class MetricsConfig:
     answer_enabled: bool = True
     ragas_enabled: bool = True
     ragas_judge_provider: str = "qwen"
+    ragas_embeddings_provider: str = ""
     ragas_context_source: str = "reranker"
     ragas_timeout_seconds: int = 60
     ragas_max_workers: int = 1
@@ -94,6 +95,8 @@ class ModelConfig:
     max_new_tokens: int = 1024
     do_sample: bool = False
     return_full_text: bool = False
+    embedding_device: str | None = None
+    normalize_embeddings: bool = True
 
 
 @dataclass(slots=True)
@@ -220,6 +223,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "answer_enabled": getattr(module, "ANSWER_METRICS_ENABLED", True),
             "ragas_enabled": getattr(module, "RAGAS_ENABLED", True),
             "ragas_judge_provider": getattr(module, "RAGAS_JUDGE_PROVIDER", "qwen"),
+            "ragas_embeddings_provider": getattr(module, "RAGAS_EMBEDDINGS_PROVIDER", ""),
             "ragas_context_source": getattr(module, "RAGAS_CONTEXT_SOURCE", "reranker"),
             "ragas_timeout_seconds": getattr(module, "RAGAS_TIMEOUT_SECONDS", 60),
             "ragas_max_workers": getattr(module, "RAGAS_MAX_WORKERS", 1),
@@ -247,6 +251,13 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "do_sample": getattr(module, "QWEN_DO_SAMPLE", False),
                 "return_full_text": getattr(module, "QWEN_RETURN_FULL_TEXT", False),
             },
+            "bge_m3": {
+                "provider": "huggingface_embeddings",
+                "model": getattr(module, "BGE_M3_MODEL_PATH", "/home/vladislav/models/bge-m3"),
+                "local_files_only": getattr(module, "BGE_M3_LOCAL_FILES_ONLY", True),
+                "embedding_device": getattr(module, "BGE_M3_DEVICE", None),
+                "normalize_embeddings": getattr(module, "BGE_M3_NORMALIZE_EMBEDDINGS", True),
+            },
             "gigachat": {
                 "provider": "gigachat_api",
                 "base_url": getattr(
@@ -257,6 +268,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "access_token": getattr(module, "GIGACHAT_ACCESS_TOKEN", ""),
                 "model": getattr(module, "GIGACHAT_MODEL", "GigaChat"),
                 "temperature": getattr(module, "GIGACHAT_TEMPERATURE", 0),
+                "verify_ssl": getattr(module, "GIGACHAT_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS", 10),
             },
         },

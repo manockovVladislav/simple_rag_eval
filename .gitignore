@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.credentials
 
 oaofr_assistant_gr/*
 retriver_gr_oaofr/*

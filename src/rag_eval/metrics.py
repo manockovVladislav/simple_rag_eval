@@ -53,7 +53,13 @@ class MetricsCalculator:
             summary_path,
             "summary",
             [summary],
-            leading_columns=["created_at", "run_file", "question_count", "error_count"],
+            leading_columns=[
+                "created_at",
+                "run_file",
+                "question_count",
+                "error_count",
+                "ragas_judge_score_mean",
+            ],
             leading_prefixes=["ragas_"],
         )
         append_xlsx_rows(
@@ -62,6 +68,27 @@ class MetricsCalculator:
             detail_rows_with_run,
             leading_columns=["created_at", "run_file", "question_id", "question"],
             leading_prefixes=["ragas_"],
+        )
+        append_xlsx_rows(
+            summary_path,
+            "judge",
+            _select_rows(detail_rows_with_run, _judge_columns),
+            leading_columns=["created_at", "run_file", "question_id", "question", "answer"],
+            leading_prefixes=["ragas_"],
+        )
+        append_xlsx_rows(
+            summary_path,
+            "retrieval",
+            _select_rows(detail_rows_with_run, _retrieval_columns),
+            leading_columns=[
+                "created_at",
+                "run_file",
+                "question_id",
+                "question",
+                "retriever_contexts",
+                "reranker_contexts",
+                "relevant_chunk_count",
+            ],
         )
         logger.info("metrics_finished output=%s", summary_path)
         return summary_path
@@ -76,6 +103,9 @@ class MetricsCalculator:
         result: dict[str, Any] = {
             "question_id": row.get("question_id"),
             "question": row.get("question"),
+            "answer": row.get("answer"),
+            "retriever_contexts": row.get("retriever_contexts"),
+            "reranker_contexts": row.get("reranker_contexts"),
             "has_error": bool(row.get("error")) if not pd.isna(row.get("error")) else False,
         }
         expected_answer = row.get("ground_truth")
@@ -126,6 +156,18 @@ class MetricsCalculator:
             "question_count": len(details),
             "error_count": int(details["has_error"].sum()) if "has_error" in details else 0,
         }
+        judge_score = _mean_of_columns(
+            details,
+            [
+                "ragas_faithfulness",
+                "ragas_context_recall",
+                "ragas_context_precision",
+                "ragas_answer_relevancy",
+            ],
+        )
+        if judge_score is not None:
+            summary["ragas_judge_score_mean"] = judge_score
+
         metric_columns = [
             column
             for column in details.columns
@@ -140,3 +182,45 @@ class MetricsCalculator:
 
 def _has_text(value: Any) -> bool:
     return value is not None and not (isinstance(value, float) and pd.isna(value)) and bool(str(value).strip())
+
+
+def _mean_of_columns(frame: pd.DataFrame, columns: list[str]) -> float | None:
+    values = []
+    for column in columns:
+        if column not in frame:
+            continue
+        valid = frame[column].dropna()
+        if len(valid):
+            values.append(valid.mean())
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
+def _select_rows(rows: list[dict[str, Any]], column_filter) -> list[dict[str, Any]]:
+    selected = []
+    leading = {
+        "created_at",
+        "run_file",
+        "question_id",
+        "question",
+        "answer",
+        "retriever_contexts",
+        "reranker_contexts",
+    }
+    for row in rows:
+        selected.append({key: value for key, value in row.items() if key in leading or column_filter(key)})
+    return selected
+
+
+def _judge_columns(column: str) -> bool:
+    return column.startswith("ragas_")
+
+
+def _retrieval_columns(column: str) -> bool:
+    return (
+        column == "relevant_chunk_count"
+        or column in {"retriever_contexts", "reranker_contexts"}
+        or column.startswith("retriever_")
+        or column.startswith("reranker_")
+    )

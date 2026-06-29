@@ -68,6 +68,7 @@ class GigaChatLangChainClient:
                 access_token=self.config.access_token,
                 model=self.config.model,
                 temperature=self.config.temperature,
+                verify_ssl_certs=self.config.verify_ssl,
                 rate_limiter=_rate_limiter(self.config),
             )
         return self._client
