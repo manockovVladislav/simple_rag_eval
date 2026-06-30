@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from rag_eval.config import AppConfig
+from rag_eval.custom_judge_evaluator import CustomJudgeEvaluator
 from rag_eval.io import append_xlsx_rows, read_table
 from rag_eval.logging_utils import setup_file_logger
 from rag_eval.ragas_evaluator import RagasEvaluator
@@ -65,21 +66,110 @@ class MetricsCalculator:
         append_xlsx_rows(
             summary_path,
             "details",
-            detail_rows_with_run,
-            leading_columns=["created_at", "run_file", "question_id", "question"],
+            _select_rows(
+                detail_rows_with_run,
+                _details_columns,
+                keep_columns=[
+                    "created_at",
+                    "run_file",
+                    "question_id",
+                    "question",
+                    "ground_truth",
+                    "answer",
+                    "retriever_contexts",
+                    "reranker_contexts",
+                    "has_error",
+                ],
+            ),
+            leading_columns=[
+                "created_at",
+                "run_file",
+                "question_id",
+                "question",
+                "ground_truth",
+                "answer",
+            ],
             leading_prefixes=["ragas_"],
         )
         append_xlsx_rows(
             summary_path,
             "judge",
-            _select_rows(detail_rows_with_run, _judge_columns),
-            leading_columns=["created_at", "run_file", "question_id", "question", "ground_truth", "answer"],
+            _select_rows(
+                detail_rows_with_run,
+                _judge_score_columns,
+                keep_columns=[
+                    "created_at",
+                    "run_file",
+                    "question_id",
+                    "question",
+                    "ground_truth",
+                    "answer",
+                    "retriever_contexts",
+                    "reranker_contexts",
+                ],
+            ),
+            leading_columns=[
+                "created_at",
+                "run_file",
+                "question_id",
+                "question",
+                "ground_truth",
+                "answer",
+                "retriever_contexts",
+                "reranker_contexts",
+            ],
+            leading_prefixes=["ragas_"],
+        )
+        append_xlsx_rows(
+            summary_path,
+            "questions",
+            _select_rows(
+                detail_rows_with_run,
+                _question_columns,
+                keep_columns=[
+                    "created_at",
+                    "run_file",
+                    "question_id",
+                    "question",
+                    "ground_truth",
+                    "answer",
+                    "retriever_contexts",
+                    "reranker_contexts",
+                    "ragas_error",
+                ],
+            ),
+            leading_columns=[
+                "created_at",
+                "run_file",
+                "question_id",
+                "question",
+                "ground_truth",
+                "answer",
+                "ragas_error",
+                "retriever_contexts",
+                "reranker_contexts",
+            ],
+            leading_prefixes=["ragas_"],
+        )
+        append_xlsx_rows(
+            summary_path,
+            "judge_debug",
+            _select_rows(
+                detail_rows_with_run,
+                _judge_debug_columns,
+                keep_columns=["created_at", "run_file", "question_id", "question", "ragas_error"],
+            ),
+            leading_columns=["created_at", "run_file", "question_id", "question", "ragas_error"],
             leading_prefixes=["ragas_"],
         )
         append_xlsx_rows(
             summary_path,
             "retrieval",
-            _select_rows(detail_rows_with_run, _retrieval_columns),
+            _select_rows(
+                detail_rows_with_run,
+                _retrieval_columns,
+                keep_columns=["created_at", "run_file", "question_id", "question", "retriever_contexts", "reranker_contexts"],
+            ),
             leading_columns=[
                 "created_at",
                 "run_file",
@@ -137,7 +227,13 @@ class MetricsCalculator:
         return metrics
 
     def _add_ragas_metrics(self, frame: pd.DataFrame, detail_rows: list[dict[str, Any]]) -> None:
-        ragas_results = RagasEvaluator(self.config).evaluate_rows(frame)
+        backend = self.config.metrics.ragas_backend
+        if backend == "custom":
+            ragas_results = CustomJudgeEvaluator(self.config).evaluate_rows(frame)
+        elif backend == "ragas":
+            ragas_results = RagasEvaluator(self.config).evaluate_rows(frame)
+        else:
+            raise ValueError("RAGAS_BACKEND must be 'custom' or 'ragas'.")
         by_question_id = {result.question_id: result for result in ragas_results}
         for row in detail_rows:
             result = by_question_id.get(row.get("question_id"))
@@ -153,15 +249,7 @@ class MetricsCalculator:
             "question_count": len(details),
             "error_count": int(details["has_error"].sum()) if "has_error" in details else 0,
         }
-        judge_score = _mean_of_columns(
-            details,
-            [
-                "ragas_faithfulness",
-                "ragas_context_recall",
-                "ragas_context_precision",
-                "ragas_answer_relevancy",
-            ],
-        )
+        judge_score = _judge_score_mean(details)
         if judge_score is not None:
             summary["ragas_judge_score_mean"] = judge_score
 
@@ -200,18 +288,14 @@ def _mean_of_columns(frame: pd.DataFrame, columns: list[str]) -> float | None:
     return float(sum(values) / len(values))
 
 
-def _select_rows(rows: list[dict[str, Any]], column_filter) -> list[dict[str, Any]]:
+def _judge_score_mean(frame: pd.DataFrame) -> float | None:
+    columns = [column for column in frame.columns if _judge_score_columns(column)]
+    return _mean_of_columns(frame, columns)
+
+
+def _select_rows(rows: list[dict[str, Any]], column_filter, keep_columns: list[str] | None = None) -> list[dict[str, Any]]:
     selected = []
-    leading = {
-        "created_at",
-        "run_file",
-        "question_id",
-        "question",
-        "ground_truth",
-        "answer",
-        "retriever_contexts",
-        "reranker_contexts",
-    }
+    leading = set(keep_columns or [])
     for row in rows:
         selected.append({key: value for key, value in row.items() if key in leading or column_filter(key)})
     return selected
@@ -219,6 +303,35 @@ def _select_rows(rows: list[dict[str, Any]], column_filter) -> list[dict[str, An
 
 def _judge_columns(column: str) -> bool:
     return column.startswith("ragas_")
+
+
+def _details_columns(column: str) -> bool:
+    return (
+        column.startswith("answer_")
+        or column.startswith("retriever_")
+        or column.startswith("reranker_")
+        or _judge_score_columns(column)
+    )
+
+
+def _judge_score_columns(column: str) -> bool:
+    return column.startswith("ragas_") and column != "ragas_error" and not _judge_diagnostic_columns(column)
+
+
+def _question_columns(column: str) -> bool:
+    return column.startswith("ragas_") and (
+        _judge_score_columns(column)
+        or column.endswith("_reason")
+        or column.endswith("_evidence")
+    )
+
+
+def _judge_debug_columns(column: str) -> bool:
+    return column.startswith("ragas_") and (column.endswith("_raw") or column == "ragas_error")
+
+
+def _judge_diagnostic_columns(column: str) -> bool:
+    return column.endswith("_reason") or column.endswith("_evidence") or column.endswith("_raw")
 
 
 def _retrieval_columns(column: str) -> bool:

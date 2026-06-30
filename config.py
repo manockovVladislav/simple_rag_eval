@@ -75,7 +75,7 @@ RETRIEVER_TOP_K = 10
 # После этого включай полный прогон:
 # MAX_QUESTIONS = None
 # RAGAS_ENABLED = True
-MAX_QUESTIONS = 1
+MAX_QUESTIONS = None
 SLEEP_SECONDS = 0
 
 # Генерация финального RAG-ответа после retriever/reranker.
@@ -100,11 +100,13 @@ RETRIEVAL_K_VALUES = [5, 10]
 # qwen: локальный Qwen3-14B через transformers.
 # gigachat: GigaChat через LangChain ChatModel.
 RAGAS_ENABLED = True
+RAGAS_BACKEND = "custom"  # "custom" - простой надежный judge; "ragas" - библиотека ragas.
 RAGAS_JUDGE_PROVIDER = "gigachat"
 RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
 RAGAS_CONTEXT_SOURCE = "retriever"
-RAGAS_TIMEOUT_SECONDS = 60
+RAGAS_TIMEOUT_SECONDS = 20
 RAGAS_MAX_WORKERS = 1
+# Для RAGAS_BACKEND = "custom" это количество retry при невалидном JSON от GigaChat.
 RAGAS_MAX_RETRIES = 3
 RAGAS_METRICS = [
     "faithfulness",

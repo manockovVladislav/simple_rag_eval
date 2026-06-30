@@ -118,6 +118,7 @@ RAG_MAX_CONTEXTS = 10
 Судья настраивается отдельно:
 
 ```python
+RAGAS_BACKEND = "ragas"
 RAGAS_JUDGE_PROVIDER = "qwen"
 ```
 
@@ -134,7 +135,9 @@ QWEN_LOCAL_FILES_ONLY = True
 GigaChat получает только четыре параметра:
 
 ```python
+RAGAS_BACKEND = "custom"
 RAGAS_JUDGE_PROVIDER = "gigachat"
+RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
 GIGACHAT_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 GIGACHAT_ACCESS_TOKEN = "..."
 GIGACHAT_MODEL = "GigaChat"
@@ -149,6 +152,10 @@ GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 10
 ```
 
 `GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS` - это локальный rate limit тестовой системы, не параметр GigaChat API.
+
+`RAGAS_BACKEND = "custom"` включает простой локальный judge: GigaChat оценивает LLM-метрики по строгому JSON,
+а `answer_similarity` считается через embeddings из `RAGAS_EMBEDDINGS_PROVIDER`.
+`RAGAS_BACKEND = "ragas"` оставляет библиотечный Ragas.
 
 ## Быстрая Проверка
 
@@ -230,7 +237,11 @@ outputs/metrics/metrics_summary.xlsx
 Листы:
 
 - `summary` - агрегаты по прогону.
-- `details` - метрики по каждому вопросу.
+- `details` - компактные метрики по каждому вопросу без технических raw-ответов.
+- `judge` - только judge score по каждому вопросу.
+- `questions` - вопрос, ответ, эталон, контексты, ошибки, причины и evidence по judge-метрикам.
+- `judge_debug` - технические raw-ответы судьи и ошибки парсинга/вызова.
+- `retrieval` - retrieval-контексты и top-k метрики.
 
 Основные метрики:
 

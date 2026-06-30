@@ -58,6 +58,7 @@ class GenerationConfig:
 class MetricsConfig:
     answer_enabled: bool = True
     ragas_enabled: bool = True
+    ragas_backend: str = "ragas"
     ragas_judge_provider: str = "qwen"
     ragas_embeddings_provider: str = ""
     ragas_context_source: str = "reranker"
@@ -222,6 +223,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "metrics": {
             "answer_enabled": getattr(module, "ANSWER_METRICS_ENABLED", True),
             "ragas_enabled": getattr(module, "RAGAS_ENABLED", True),
+            "ragas_backend": getattr(module, "RAGAS_BACKEND", "ragas"),
             "ragas_judge_provider": getattr(module, "RAGAS_JUDGE_PROVIDER", "qwen"),
             "ragas_embeddings_provider": getattr(module, "RAGAS_EMBEDDINGS_PROVIDER", ""),
             "ragas_context_source": getattr(module, "RAGAS_CONTEXT_SOURCE", "reranker"),
