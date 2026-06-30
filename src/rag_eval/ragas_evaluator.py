@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+
 from rag_eval.config import AppConfig, ModelConfig
+from rag_eval.huggingface_embeddings import make_huggingface_embeddings
 from rag_eval.io import contexts_from_json
 from rag_eval.logging_utils import setup_file_logger
 
@@ -21,6 +27,46 @@ class RagasEvaluationRow:
     question_id: Any
     metrics: dict[str, float | None]
     error: str | None = None
+
+
+class SafeGigaChatForRagas(BaseChatModel):
+    client: object
+    strict_prompt: str = (
+        "Ты работаешь как evaluator для Ragas. "
+        "Если запрос просит JSON, верни только валидный JSON без markdown, пояснений и code fences. "
+        "Если запрос просит число или score, верни только требуемое значение."
+    )
+
+    @property
+    def _llm_type(self) -> str:
+        return "safe_gigachat_for_ragas"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        prompt_parts = [self.strict_prompt]
+
+        for message in messages:
+            content = _message_content(message.content)
+            if content:
+                prompt_parts.append(content)
+
+        safe_messages = [
+            HumanMessage(content="\n\n".join(prompt_parts))
+        ]
+
+        response = self.client.invoke(safe_messages)
+
+        content = _clean_llm_content(getattr(response, "content", ""))
+
+        if not content or content == "{}":
+            raise ValueError(f"GigaChat returned empty response: {response}")
+
+        return ChatResult(
+            generations=[
+                ChatGeneration(
+                    message=AIMessage(content=content)
+                )
+            ]
+        )
 
 
 class RagasEvaluator:
@@ -55,17 +101,25 @@ class RagasEvaluator:
         if answer_sample is not None:
             logger.info("judge_request question_id=%s sample=%s", question_id, answer_sample)
             metrics = self._answer_metrics_for_sample(answer_sample)
-            if metrics:
+            for metric in metrics:
                 try:
-                    values = self._evaluate_one(answer_sample, metrics)
-                    all_metrics.update({f"ragas_{key}": value for key, value in values.items()})
+                    logger.info("judge_metric_started question_id=%s metric=%s", question_id, metric.name)
+                    value = self._evaluate_metric(answer_sample, metric)
+                    all_metrics[f"ragas_{metric.name}"] = value
+                    if value is None:
+                        errors.append(f"{metric.name}: empty Ragas result")
+                    logger.info("judge_metric_finished question_id=%s metric=%s value=%s", question_id, metric.name, value)
                 except Exception as exc:
-                    errors.append(f"answer: {type(exc).__name__}: {exc}")
+                    errors.append(f"{metric.name}: {type(exc).__name__}: {exc}")
 
         error = "; ".join(errors) if errors else None
         if not all_metrics and not error:
             error = "Not enough data for Ragas metrics."
         return RagasEvaluationRow(question_id, all_metrics, error)
+
+    def _evaluate_metric(self, sample: dict[str, Any], metric: Any) -> float | None:
+        values = self._evaluate_one(sample, [metric])
+        return values.get(metric.name)
 
     def _evaluate_one(self, sample: dict[str, Any], metrics: list[Any]) -> dict[str, float | None]:
         from datasets import Dataset
@@ -87,14 +141,12 @@ class RagasEvaluator:
             raise_exceptions=False,
             show_progress=False,
         )
+
         result_frame = result.to_pandas()
         if result_frame.empty:
             return {}
         first = result_frame.iloc[0]
-        return {
-            metric.name: _none_if_nan(first.get(metric.name))
-            for metric in metrics
-        }
+        return {metric.name: _none_if_nan(first.get(metric.name)) for metric in metrics}
 
     def _make_answer_sample(self, row: pd.Series, source: str, fallback: bool = False) -> dict[str, Any] | None:
         question = _clean_text(row.get("question"))
@@ -168,7 +220,7 @@ class RagasEvaluator:
             raise ValueError(
                 f"Ragas embeddings provider '{provider}' must use provider='huggingface_embeddings'."
             )
-        self._langchain_embeddings = _make_huggingface_embeddings(model_config)
+        self._langchain_embeddings = make_huggingface_embeddings(model_config)
         return self._langchain_embeddings
 
     def _ensure_ragas_installed(self) -> None:
@@ -198,7 +250,7 @@ def _make_gigachat_langchain_llm(model_config: ModelConfig):
     except ImportError:
         from langchain_community.chat_models.gigachat import GigaChat
 
-    return GigaChat(
+    client = GigaChat(
         base_url=model_config.base_url,
         access_token=model_config.access_token,
         model=model_config.model,
@@ -206,6 +258,7 @@ def _make_gigachat_langchain_llm(model_config: ModelConfig):
         verify_ssl_certs=model_config.verify_ssl,
         rate_limiter=_rate_limiter(model_config),
     )
+    return SafeGigaChatForRagas(client=client)
 
 
 def _make_transformers_llm(model_config: ModelConfig):
@@ -236,74 +289,6 @@ def _make_transformers_llm(model_config: ModelConfig):
     if model_config.device is not None:
         kwargs["device"] = model_config.device
     return HuggingFacePipeline.from_model_id(**kwargs)
-
-
-def _make_huggingface_embeddings(model_config: ModelConfig):
-    model_kwargs: dict[str, Any] = {}
-    if model_config.local_files_only:
-        model_kwargs["local_files_only"] = True
-
-    try:
-        from ragas.embeddings import HuggingFaceEmbeddings as RagasHuggingFaceEmbeddings
-
-        embeddings = RagasHuggingFaceEmbeddings(
-            model=model_config.model,
-            device=model_config.embedding_device,
-            normalize_embeddings=model_config.normalize_embeddings,
-            **model_kwargs,
-        )
-        return _SyncEmbeddingsAdapter(embeddings)
-    except ImportError:
-        pass
-
-    try:
-        from langchain_huggingface import HuggingFaceEmbeddings
-    except ImportError:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-
-    if model_config.embedding_device:
-        model_kwargs["device"] = model_config.embedding_device
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name=model_config.model,
-        model_kwargs=model_kwargs,
-        encode_kwargs={"normalize_embeddings": model_config.normalize_embeddings},
-        show_progress=False,
-    )
-    return _SyncEmbeddingsAdapter(embeddings)
-
-
-class _SyncEmbeddingsAdapter:
-    def __init__(self, embeddings: Any):
-        self.embeddings = embeddings
-
-    def embed_text(self, text: str) -> list[float]:
-        if hasattr(self.embeddings, "embed_text"):
-            return self.embeddings.embed_text(text)
-        return self.embeddings.embed_query(text)
-
-    def embed_query(self, text: str) -> list[float]:
-        return self.embed_text(text)
-
-    async def aembed_text(self, text: str) -> list[float]:
-        return self.embed_text(text)
-
-    async def aembed_query(self, text: str) -> list[float]:
-        return self.embed_query(text)
-
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        if hasattr(self.embeddings, "embed_texts"):
-            return self.embeddings.embed_texts(texts)
-        return self.embeddings.embed_documents(texts)
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self.embed_texts(texts)
-
-    async def aembed_texts(self, texts: list[str]) -> list[list[float]]:
-        return self.embed_texts(texts)
-
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self.embed_documents(texts)
 
 
 def _rate_limiter(model_config: ModelConfig):
@@ -362,6 +347,26 @@ def _clean_text(value: Any) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     return str(value).strip()
+
+
+def _message_content(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(value.get("text") or value.get("content") or value.get("message") or "").strip()
+    if isinstance(value, list):
+        parts = [_message_content(item) for item in value]
+        return "\n".join(part for part in parts if part)
+    return str(value).strip()
+
+
+def _clean_llm_content(value: Any) -> str:
+    content = _message_content(value)
+    content = content.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        content = fenced.group(1).strip()
+    return content
 
 
 def _none_if_nan(value: Any) -> float | None:

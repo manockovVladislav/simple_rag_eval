@@ -73,7 +73,7 @@ class MetricsCalculator:
             summary_path,
             "judge",
             _select_rows(detail_rows_with_run, _judge_columns),
-            leading_columns=["created_at", "run_file", "question_id", "question", "answer"],
+            leading_columns=["created_at", "run_file", "question_id", "question", "ground_truth", "answer"],
             leading_prefixes=["ragas_"],
         )
         append_xlsx_rows(
@@ -87,7 +87,6 @@ class MetricsCalculator:
                 "question",
                 "retriever_contexts",
                 "reranker_contexts",
-                "relevant_chunk_count",
             ],
         )
         logger.info("metrics_finished output=%s", summary_path)
@@ -100,17 +99,17 @@ class MetricsCalculator:
         return files[-1]
 
     def _row_metrics(self, row: pd.Series) -> dict[str, Any]:
+        ground_truth = _ground_truth(row)
         result: dict[str, Any] = {
             "question_id": row.get("question_id"),
             "question": row.get("question"),
+            "ground_truth": ground_truth,
             "answer": row.get("answer"),
             "retriever_contexts": row.get("retriever_contexts"),
             "reranker_contexts": row.get("reranker_contexts"),
             "has_error": bool(row.get("error")) if not pd.isna(row.get("error")) else False,
         }
-        expected_answer = row.get("ground_truth")
-        if not _has_text(expected_answer):
-            expected_answer = row.get("expected_answer")
+        expected_answer = ground_truth
         answer = row.get("answer")
         if self.config.metrics.answer_enabled and _has_text(expected_answer) and _has_text(answer):
             result["answer_exact_match"] = exact_match(expected_answer, answer)
@@ -124,9 +123,7 @@ class MetricsCalculator:
         if not relevant_ids:
             return {}
 
-        metrics: dict[str, Any] = {
-            "relevant_chunk_count": len(set(relevant_ids)),
-        }
+        metrics: dict[str, Any] = {}
         for source in ("retriever", "reranker"):
             column = f"{source}_contexts"
             ids = context_chunk_ids(row.get(column))
@@ -176,12 +173,18 @@ class MetricsCalculator:
         for column in metric_columns:
             valid = details[column].dropna()
             summary[f"{column}_mean"] = valid.mean() if len(valid) else None
-            summary[f"{column}_count"] = int(len(valid))
         return summary
 
 
 def _has_text(value: Any) -> bool:
     return value is not None and not (isinstance(value, float) and pd.isna(value)) and bool(str(value).strip())
+
+
+def _ground_truth(row: pd.Series) -> Any:
+    for column in ("ground_truth", "expected_answer", "grouth_true", "golden_answer"):
+        if column in row and _has_text(row.get(column)):
+            return row.get(column)
+    return None
 
 
 def _mean_of_columns(frame: pd.DataFrame, columns: list[str]) -> float | None:
@@ -204,6 +207,7 @@ def _select_rows(rows: list[dict[str, Any]], column_filter) -> list[dict[str, An
         "run_file",
         "question_id",
         "question",
+        "ground_truth",
         "answer",
         "retriever_contexts",
         "reranker_contexts",
@@ -219,8 +223,7 @@ def _judge_columns(column: str) -> bool:
 
 def _retrieval_columns(column: str) -> bool:
     return (
-        column == "relevant_chunk_count"
-        or column in {"retriever_contexts", "reranker_contexts"}
+        column in {"retriever_contexts", "reranker_contexts"}
         or column.startswith("retriever_")
         or column.startswith("reranker_")
     )

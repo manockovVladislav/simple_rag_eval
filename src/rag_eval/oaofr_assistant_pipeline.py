@@ -16,10 +16,10 @@ for repo_path in (NEW_RETRIEVER_REPO, OLD_RETRIEVER_REPO):
         sys.path.insert(0, str(repo_path))
 
 if NEW_RETRIEVER_REPO.exists():
-    from retrivers.hybrid_retriever_new_all_formulas import (  # noqa: E402
+    from retrievers.hybrid_retriever_new_all_formulas import (  # noqa: E402
         HybridRetriever_all_formulas,
     )
-    from retrivers.hybrid_retriever_new_all_formulas_and_reranker import (  # noqa: E402
+    from retrievers.hybrid_retriever_new_all_formulas_and_reranker import (  # noqa: E402
         HybridRetriever_all_formulas_and_reranker,
     )
 else:
@@ -46,7 +46,7 @@ class RagEvalHybridRetrieverOnly(HybridRetriever_all_formulas):
     def answer_question(self, question: str) -> PipelineResult:
         retriever_contexts = self._search(question)
         return PipelineResult(
-            answer=None,
+            answer=_extractive_answer(retriever_contexts),
             retriever_contexts=[ContextItem.from_any(item) for item in retriever_contexts],
             reranker_contexts=[],
             metadata={"pipeline": type(self).__name__},
@@ -80,9 +80,10 @@ class RagEvalHybridRetrieverWithReranker(HybridRetriever_all_formulas_and_rerank
         else:
             retriever_contexts = self._search_without_reranker(question)
             reranker_contexts = self._search(question)
+        answer_contexts = reranker_contexts or retriever_contexts
 
         return PipelineResult(
-            answer=None,
+            answer=_extractive_answer(answer_contexts),
             retriever_contexts=[ContextItem.from_any(item) for item in retriever_contexts],
             reranker_contexts=[ContextItem.from_any(item) for item in reranker_contexts],
             metadata={"pipeline": type(self).__name__},
@@ -123,3 +124,13 @@ def create_reranker_pipeline(config: AppConfig) -> RagEvalHybridRetrieverWithRer
         eval_search_kwargs=adapter.search_kwargs,
         **adapter.init_kwargs,
     )
+
+
+def _extractive_answer(contexts: list[dict[str, Any]]) -> str | None:
+    if not contexts:
+        return None
+    text = str(contexts[0].get("text") or "").strip()
+    if not text:
+        return None
+    first_paragraph = text.split("\n\n", 1)[0].strip()
+    return first_paragraph[:900]

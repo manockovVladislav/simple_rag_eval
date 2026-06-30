@@ -32,13 +32,13 @@ CHUNK_ID_COLUMN = "chunk_id"
 # Какой pipeline запускать.
 #
 # 1. Демо-проверка тестовой системы без внешнего ретривера:
-PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
+# PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 #
-# 2. Твой файл oaofr_assistant_gr/retrivers/hybrid_retriever_new_all_formulas.py
+# 2. Твой файл oaofr_assistant_gr/retrievers/hybrid_retriever_new_all_formulas.py
 #    Только retriever, без reranker. Результаты попадут в retriever_contexts.
-# PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_retriever_pipeline"
+PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_retriever_pipeline"
 #
-# 3. Твой файл oaofr_assistant_gr/retrivers/hybrid_retriever_new_all_formulas_and_reranker.py
+# 3. Твой файл oaofr_assistant_gr/retrievers/hybrid_retriever_new_all_formulas_and_reranker.py
 #    Retriever + reranker. Результаты retriever попадут в retriever_contexts,
 #    результаты reranker попадут в reranker_contexts.
 # PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_reranker_pipeline"
@@ -48,15 +48,16 @@ PIPELINE_FACTORY = "examples.my_pipeline:create_pipeline"
 # Сюда добавлять ровно те аргументы, которые принимает __init__ класса:
 # - faiss_path: путь к локальному FAISS индексу;
 # - pkl_path: путь к локальному pkl с корпусом/метаданными;
-# - model_name: "bge-m3" или "e5-large";
+# - model_name: "bge-m3", "e5-large" или "local-hash" для локальной тестовой базы;
 # - fusion_method, alpha, bias, device и другие параметры твоего класса;
 # - reranker: True/False только для класса retriever + reranker.
 RETRIEVER_INIT_ARGS = []
 RETRIEVER_INIT_KWARGS = {
-    # "faiss_path": "oaofr_assistant_gr/vectors/index.faiss",
-    # "pkl_path": "oaofr_assistant_gr/vectors/corpus.pkl",
-    # "model_name": "bge-m3",
-    # "fusion_method": "rrf",
+    "faiss_path": "oaofr_assistant_gr/vectors/index.faiss",
+    "pkl_path": "oaofr_assistant_gr/vectors/metadata.pkl",
+    "model_name": "local-hash",
+    "fusion_method": "rrf",
+    "device": "cpu",
     # "reranker": True,
 }
 RETRIEVER_SEARCH_KWARGS = {}
@@ -74,7 +75,7 @@ RETRIEVER_TOP_K = 10
 # После этого включай полный прогон:
 # MAX_QUESTIONS = None
 # RAGAS_ENABLED = True
-MAX_QUESTIONS = None
+MAX_QUESTIONS = 1
 SLEEP_SECONDS = 0
 
 # Генерация финального RAG-ответа после retriever/reranker.
@@ -83,7 +84,7 @@ SLEEP_SECONDS = 0
 # например, RAG_LLM_PROVIDER = "gigachat", RAGAS_JUDGE_PROVIDER = "qwen".
 RAG_ANSWER_ENABLED = True
 RAG_LLM_PROVIDER = "qwen"
-RAG_CONTEXT_SOURCE = "reranker"
+RAG_CONTEXT_SOURCE = "retriever"
 RAG_MAX_CONTEXTS = 10
 RAG_SYSTEM_PROMPT = (
     "Ты отвечаешь на вопрос только по переданному контексту. "
@@ -101,13 +102,13 @@ RETRIEVAL_K_VALUES = [5, 10]
 RAGAS_ENABLED = True
 RAGAS_JUDGE_PROVIDER = "gigachat"
 RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
-RAGAS_CONTEXT_SOURCE = "reranker"
-RAGAS_TIMEOUT_SECONDS = 61
+RAGAS_CONTEXT_SOURCE = "retriever"
+RAGAS_TIMEOUT_SECONDS = 60
 RAGAS_MAX_WORKERS = 1
-RAGAS_MAX_RETRIES = 0
+RAGAS_MAX_RETRIES = 3
 RAGAS_METRICS = [
     "faithfulness",
-    # "answer_correctness",
+    "answer_correctness",
     "answer_relevancy",
     "answer_similarity",
     "context_precision",

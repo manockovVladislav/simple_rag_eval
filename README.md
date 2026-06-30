@@ -90,7 +90,7 @@ PIPELINE_FACTORY = "rag_eval.oaofr_assistant_pipeline:create_reranker_pipeline"
 ```python
 RETRIEVER_INIT_KWARGS = {
     "faiss_path": "oaofr_assistant_gr/vectors/index.faiss",
-    "pkl_path": "oaofr_assistant_gr/vectors/corpus.pkl",
+    "pkl_path": "oaofr_assistant_gr/vectors/metadata.pkl",
     "model_name": "bge-m3",
     "fusion_method": "rrf",
     "reranker": True,
