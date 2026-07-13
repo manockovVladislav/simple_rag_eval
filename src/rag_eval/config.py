@@ -65,6 +65,7 @@ class MetricsConfig:
     ragas_timeout_seconds: int = 60
     ragas_max_workers: int = 1
     ragas_max_retries: int = 0
+    ragas_judge_max_context_chars: int = 60_000
     retrieval_k_values: list[int] = field(default_factory=lambda: [1, 3, 5, 10])
     ragas_metrics: list[str] = field(
         default_factory=lambda: [
@@ -230,6 +231,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "ragas_timeout_seconds": getattr(module, "RAGAS_TIMEOUT_SECONDS", 60),
             "ragas_max_workers": getattr(module, "RAGAS_MAX_WORKERS", 1),
             "ragas_max_retries": getattr(module, "RAGAS_MAX_RETRIES", 0),
+            "ragas_judge_max_context_chars": getattr(module, "RAGAS_JUDGE_MAX_CONTEXT_CHARS", 60_000),
             "retrieval_k_values": getattr(module, "RETRIEVAL_K_VALUES", [1, 3, 5, 10]),
             "ragas_metrics": getattr(
                 module,

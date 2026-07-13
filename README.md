@@ -7,9 +7,9 @@
 1. Читает вопросы из `data/golden_questions.xlsx`.
 2. Запускает выбранный pipeline из `config.py`.
 3. После retriever/reranker отправляет контекст в выбранную RAG LLM и сохраняет ответ.
-4. Сохраняет ответы и контексты в `outputs/runs/rag_run_*.xlsx`.
+4. Сохраняет ответы и контексты в пару `outputs/runs/rag_run_*.xlsx` + `rag_run_*.json`.
 5. Считает top-k метрики по размеченным chunk id и judge-метрики по финальному ответу.
-6. Дописывает результат в `outputs/metrics/metrics_summary.xlsx`.
+6. Дописывает результат в `outputs/metrics/metrics_summary.xlsx` и `metrics_summary.json`.
 
 ## Установка
 
@@ -149,12 +149,16 @@ GIGACHAT_TEMPERATURE = 0
 ```python
 RAGAS_MAX_WORKERS = 1
 GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 10
+RAGAS_JUDGE_MAX_CONTEXT_CHARS = 60000
 ```
 
 `GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS` - это локальный rate limit тестовой системы, не параметр GigaChat API.
+Полные контексты не обрезаются в run JSON. `RAGAS_JUDGE_MAX_CONTEXT_CHARS` ограничивает
+только копию, передаваемую судье, чтобы не превысить окно модели.
 
 `RAGAS_BACKEND = "custom"` включает простой локальный judge: GigaChat оценивает LLM-метрики по строгому JSON,
 а `answer_similarity` считается через embeddings из `RAGAS_EMBEDDINGS_PROVIDER`.
+Custom judge возвращает score по десятичной шкале с шагом `0.1`; лимит на длину его ответа не задаётся.
 `RAGAS_BACKEND = "ragas"` оставляет библиотечный Ragas.
 
 ## Быстрая Проверка
@@ -176,6 +180,7 @@ python scripts/run_questions.py --config config.py
 
 ```text
 outputs/runs/rag_run_*.xlsx
+outputs/runs/rag_run_*.json
 ```
 
 ## Полный Запуск
@@ -226,13 +231,22 @@ Run-файлы:
 
 ```text
 outputs/runs/rag_run_*.xlsx
+outputs/runs/rag_run_*.json
 ```
 
 Итоговые метрики:
 
 ```text
 outputs/metrics/metrics_summary.xlsx
+outputs/metrics/metrics_summary.json
 ```
+
+JSON — полный источник данных без лимита длины ячейки Excel. В Excel есть колонка `json_file`;
+при расчёте метрик по `.xlsx` система автоматически читает полные строки из парного JSON.
+Каждый run также хранит snapshot параметров. В `metrics_summary` выводятся `model_name`, `temperature`,
+`judge_model_name`, `judge_temperature`, `k_rrf`, `fusion_method`, `alpha`, `bias`, `rerank_initial_k`,
+`retriever_top_k`, а также средние `retriever_context_count_mean` и `reranker_context_count_mean`.
+В `main.ipynb` есть отключённая по умолчанию ячейка grid search; каждая комбинация создаёт отдельный run.
 
 Листы:
 

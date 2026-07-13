@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from rag_eval.config import AppConfig, ModelConfig
 from rag_eval.custom_judge_prompts import STRICT_JSON_INSTRUCTION, metric_prompt
@@ -82,22 +83,22 @@ class CustomJudgeEvaluator:
         raw_response = ""
         last_error: Exception | None = None
 
-        for attempt in range(max_attempts):
-            response = self._llm_model().invoke(messages)
-            raw_response = _clean_text(getattr(response, "content", ""))
+        for _ in range(max_attempts):
             try:
+                response = self._llm_model().invoke(messages)
+                raw_response = _response_text(getattr(response, "content", ""))
                 parsed = _parse_judge_json(raw_response)
                 return {
-                    "score": _clamp_score(parsed["score"]),
+                    "score": _stable_score(parsed["score"]),
                     "reason": str(parsed.get("reason") or "").strip(),
-                    "evidence": _string_list(parsed.get("evidence")),
+                    "evidence": _string_list(parsed.get("evidence"))[:3],
                     "raw_response": raw_response,
                 }
             except Exception as exc:
                 last_error = exc
                 messages = [
-                    *messages,
-                    AIMessage(content=raw_response),
+                    *self._messages(metric, sample),
+                    AIMessage(content=raw_response or "<вызов завершился ошибкой>"),
                     HumanMessage(content=_repair_prompt(str(exc))),
                 ]
 
@@ -128,11 +129,12 @@ class CustomJudgeEvaluator:
             f"Вопрос:\n{sample['question']}\n\n"
             f"Ответ модели:\n{sample['answer']}\n\n"
             f"Эталонный ответ:\n{sample.get('ground_truth') or ''}\n\n"
-            f"Найденные контексты:\n{_format_contexts(sample['contexts'])}\n\n"
+            f"Найденные контексты:\n"
+            f"{_format_contexts(sample['contexts'], self.config.metrics.ragas_judge_max_context_chars)}\n\n"
             "Оцени только указанную метрику и верни JSON по схеме."
         )
         return [
-            HumanMessage(content=f"{STRICT_JSON_INSTRUCTION}\n\n{prompt.instruction}"),
+            SystemMessage(content=f"{STRICT_JSON_INSTRUCTION}\n\nКритерий текущей метрики:\n{prompt.instruction}"),
             HumanMessage(content=f"Положительный пример:\n{prompt.positive_example}"),
             AIMessage(content='{"score": 1.0, "reason": "пример валидного JSON", "evidence": ["пример"]}'),
             HumanMessage(content=f"Отрицательный пример:\n{prompt.negative_example}"),
@@ -184,7 +186,10 @@ class CustomJudgeEvaluator:
         model_config = self.config.models[provider]
         if model_config.provider != "gigachat_api" and provider != "gigachat":
             raise ValueError("Custom judge is intended for provider='gigachat'.")
-        self._llm = _make_gigachat_model(model_config)
+        self._llm = _make_gigachat_model(
+            model_config,
+            timeout_seconds=self.config.metrics.ragas_timeout_seconds,
+        )
         return self._llm
 
     def _embed_text(self, text: str) -> list[float]:
@@ -212,7 +217,7 @@ class CustomJudgeEvaluator:
         return self._embeddings
 
 
-def _make_gigachat_model(model_config: ModelConfig):
+def _make_gigachat_model(model_config: ModelConfig, timeout_seconds: int | None = None):
     try:
         from langchain_gigachat.chat_models import GigaChat
     except ImportError:
@@ -222,7 +227,9 @@ def _make_gigachat_model(model_config: ModelConfig):
         base_url=model_config.base_url,
         access_token=model_config.access_token,
         model=model_config.model,
-        temperature=model_config.temperature,
+        # Judge must be deterministic even if generation uses another temperature.
+        temperature=0.0,
+        timeout=timeout_seconds or model_config.timeout_seconds,
         verify_ssl_certs=model_config.verify_ssl,
         rate_limiter=_rate_limiter(model_config),
     )
@@ -245,15 +252,28 @@ def _parse_judge_json(value: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if match is None:
-            raise
-        parsed = json.loads(match.group(0))
+        parsed = _first_json_object(text)
     if not isinstance(parsed, dict):
         raise ValueError("judge response is not a JSON object")
-    if "score" not in parsed:
-        raise ValueError("judge response does not contain score")
+    missing = {"score", "reason", "evidence"} - set(parsed)
+    if missing:
+        raise ValueError(f"judge response does not contain required fields: {sorted(missing)}")
+    unknown = set(parsed) - {"score", "reason", "evidence"}
+    if unknown:
+        raise ValueError(f"judge response contains unknown fields: {sorted(unknown)}")
     return parsed
+
+
+def _first_json_object(value: str) -> dict[str, Any]:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", value):
+        try:
+            parsed, _ = decoder.raw_decode(value[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("judge response does not contain a valid JSON object")
 
 
 def _strip_fence(value: str) -> str:
@@ -263,12 +283,22 @@ def _strip_fence(value: str) -> str:
 
 
 def _clamp_score(value: Any) -> float:
+    if isinstance(value, str):
+        value = value.strip().replace(",", ".")
     score = float(value)
+    if not math.isfinite(score):
+        raise ValueError("judge score must be finite")
     if score < 0:
         return 0.0
     if score > 1:
         return 1.0
     return score
+
+
+def _stable_score(value: Any) -> float:
+    """Normalize model output to the documented decimal scale."""
+    score = _clamp_score(value)
+    return round(score, 1)
 
 
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -295,12 +325,37 @@ def _repair_prompt(error: str) -> str:
     return (
         "Предыдущий ответ не соответствует строгому JSON-формату. "
         f"Ошибка парсинга: {error}. "
-        'Верни только JSON вида {"score": 0.0, "reason": "кратко", "evidence": []}.'
+        'Повторно примени тот же критерий и верни только JSON вида '
+        '{"score": 0.0, "reason": "кратко", "evidence": []}. '
+        'score допустим с шагом 0.1 от 0.0 до 1.0.'
     )
 
 
-def _format_contexts(contexts: list[str]) -> str:
-    return "\n\n".join(f"[{index}] {context}" for index, context in enumerate(contexts, start=1))
+def _response_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+            else:
+                parts.append(str(item))
+        return "".join(parts).strip()
+    return _clean_text(value)
+
+
+def _format_contexts(contexts: list[str], max_chars: int = 60_000) -> str:
+    if not contexts:
+        return "<контексты отсутствуют>"
+    budget = max(1_000, max_chars)
+    per_context = max(200, budget // len(contexts) - 32)
+    formatted = []
+    for index, context in enumerate(contexts, start=1):
+        if len(context) > per_context:
+            context = context[:per_context] + "… [сокращено для judge; полный текст в run JSON]"
+        formatted.append(f"[{index}] {context}")
+    return "\n\n".join(formatted)
 
 
 def _context_texts(value: Any) -> list[str]:

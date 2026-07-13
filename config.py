@@ -57,7 +57,11 @@ RETRIEVER_INIT_KWARGS = {
     "pkl_path": "oaofr_assistant_gr/vectors/metadata.pkl",
     "model_name": "local-hash",
     "fusion_method": "rrf",
+    "k_rrf": 60,
+    "alpha": 0.5,
+    "bias": 0.0,
     "device": "cpu",
+    # "rerank_initial_k": 50,  # Только для pipeline с reranker.
     # "reranker": True,
 }
 RETRIEVER_SEARCH_KWARGS = {}
@@ -108,6 +112,8 @@ RAGAS_TIMEOUT_SECONDS = 20
 RAGAS_MAX_WORKERS = 1
 # Для RAGAS_BACKEND = "custom" это количество retry при невалидном JSON от GigaChat.
 RAGAS_MAX_RETRIES = 3
+# Полный контекст всегда остается в run JSON; этот лимит защищает окно judge API.
+RAGAS_JUDGE_MAX_CONTEXT_CHARS = 60_000
 RAGAS_METRICS = [
     "faithfulness",
     "answer_correctness",

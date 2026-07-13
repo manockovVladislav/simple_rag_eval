@@ -8,7 +8,7 @@ import pandas as pd
 
 from rag_eval.config import AppConfig
 from rag_eval.custom_judge_evaluator import CustomJudgeEvaluator
-from rag_eval.io import append_xlsx_rows, read_table
+from rag_eval.io import append_json_rows, append_xlsx_rows, contexts_from_json, read_run_table
 from rag_eval.logging_utils import setup_file_logger
 from rag_eval.ragas_evaluator import RagasEvaluator
 from rag_eval.retrieval_metrics import context_chunk_ids, parse_relevant_chunk_ids, retrieval_metrics_for_ids
@@ -35,21 +35,24 @@ class MetricsCalculator:
     def evaluate(self, run_file: str | Path) -> Path:
         logger = setup_file_logger(self.config.paths.log_file)
         run_path = Path(run_file)
-        frame = read_table(run_path)
-        logger.info("metrics_started run_file=%s rows=%s", run_path, len(frame))
+        frame, data_path = read_run_table(run_path)
+        logger.info("metrics_started run_file=%s data_file=%s rows=%s", run_path, data_path, len(frame))
         iterator = tqdm(frame.iterrows(), total=len(frame), desc="Calculating metrics")
         detail_rows = [self._row_metrics(row) for _, row in iterator]
         if self.config.metrics.ragas_enabled:
             self._add_ragas_metrics(frame, detail_rows)
         details = pd.DataFrame(detail_rows)
-        summary = self._summary(details, run_path)
+        summary = self._summary(details, frame, run_path, data_path)
         created_at = summary["created_at"]
 
         detail_rows_with_run = []
         for row in detail_rows:
-            detail_rows_with_run.append({"created_at": created_at, "run_file": str(run_path), **row})
+            detail_rows_with_run.append(
+                {"created_at": created_at, "run_file": str(run_path), "json_file": str(data_path), **row}
+            )
 
         summary_path = self.config.paths.summary_metrics_file
+        summary_json_path = summary_path.with_suffix(".json")
         append_xlsx_rows(
             summary_path,
             "summary",
@@ -57,33 +60,33 @@ class MetricsCalculator:
             leading_columns=[
                 "created_at",
                 "run_file",
+                "json_file",
                 "question_count",
                 "error_count",
+                "retriever_context_count_mean",
+                "reranker_context_count_mean",
+                *_run_parameter_columns,
                 "ragas_judge_score_mean",
             ],
             leading_prefixes=["ragas_"],
         )
+        append_json_rows(summary_json_path, "summary", [summary])
+        details_rows = _select_rows(
+            detail_rows_with_run,
+            _details_columns,
+            keep_columns=[
+                "created_at", "run_file", "json_file", "question_id", "question", "ground_truth",
+                "answer", "retriever_contexts", "reranker_contexts", "has_error",
+            ],
+        )
         append_xlsx_rows(
             summary_path,
             "details",
-            _select_rows(
-                detail_rows_with_run,
-                _details_columns,
-                keep_columns=[
-                    "created_at",
-                    "run_file",
-                    "question_id",
-                    "question",
-                    "ground_truth",
-                    "answer",
-                    "retriever_contexts",
-                    "reranker_contexts",
-                    "has_error",
-                ],
-            ),
+            details_rows,
             leading_columns=[
                 "created_at",
                 "run_file",
+                "json_file",
                 "question_id",
                 "question",
                 "ground_truth",
@@ -91,26 +94,23 @@ class MetricsCalculator:
             ],
             leading_prefixes=["ragas_"],
         )
+        append_json_rows(summary_json_path, "details", details_rows)
+        judge_rows = _select_rows(
+            detail_rows_with_run,
+            _judge_score_columns,
+            keep_columns=[
+                "created_at", "run_file", "json_file", "question_id", "question", "ground_truth",
+                "answer", "retriever_contexts", "reranker_contexts",
+            ],
+        )
         append_xlsx_rows(
             summary_path,
             "judge",
-            _select_rows(
-                detail_rows_with_run,
-                _judge_score_columns,
-                keep_columns=[
-                    "created_at",
-                    "run_file",
-                    "question_id",
-                    "question",
-                    "ground_truth",
-                    "answer",
-                    "retriever_contexts",
-                    "reranker_contexts",
-                ],
-            ),
+            judge_rows,
             leading_columns=[
                 "created_at",
                 "run_file",
+                "json_file",
                 "question_id",
                 "question",
                 "ground_truth",
@@ -120,27 +120,23 @@ class MetricsCalculator:
             ],
             leading_prefixes=["ragas_"],
         )
+        append_json_rows(summary_json_path, "judge", judge_rows)
+        question_rows = _select_rows(
+            detail_rows_with_run,
+            _question_columns,
+            keep_columns=[
+                "created_at", "run_file", "json_file", "question_id", "question", "ground_truth",
+                "answer", "retriever_contexts", "reranker_contexts", "ragas_error",
+            ],
+        )
         append_xlsx_rows(
             summary_path,
             "questions",
-            _select_rows(
-                detail_rows_with_run,
-                _question_columns,
-                keep_columns=[
-                    "created_at",
-                    "run_file",
-                    "question_id",
-                    "question",
-                    "ground_truth",
-                    "answer",
-                    "retriever_contexts",
-                    "reranker_contexts",
-                    "ragas_error",
-                ],
-            ),
+            question_rows,
             leading_columns=[
                 "created_at",
                 "run_file",
+                "json_file",
                 "question_id",
                 "question",
                 "ground_truth",
@@ -151,35 +147,44 @@ class MetricsCalculator:
             ],
             leading_prefixes=["ragas_"],
         )
+        append_json_rows(summary_json_path, "questions", question_rows)
+        debug_rows = _select_rows(
+            detail_rows_with_run,
+            _judge_debug_columns,
+            keep_columns=["created_at", "run_file", "json_file", "question_id", "question", "ragas_error"],
+        )
         append_xlsx_rows(
             summary_path,
             "judge_debug",
-            _select_rows(
-                detail_rows_with_run,
-                _judge_debug_columns,
-                keep_columns=["created_at", "run_file", "question_id", "question", "ragas_error"],
-            ),
-            leading_columns=["created_at", "run_file", "question_id", "question", "ragas_error"],
+            debug_rows,
+            leading_columns=["created_at", "run_file", "json_file", "question_id", "question", "ragas_error"],
             leading_prefixes=["ragas_"],
+        )
+        append_json_rows(summary_json_path, "judge_debug", debug_rows)
+        retrieval_rows = _select_rows(
+            detail_rows_with_run,
+            _retrieval_columns,
+            keep_columns=[
+                "created_at", "run_file", "json_file", "question_id", "question",
+                "retriever_contexts", "reranker_contexts",
+            ],
         )
         append_xlsx_rows(
             summary_path,
             "retrieval",
-            _select_rows(
-                detail_rows_with_run,
-                _retrieval_columns,
-                keep_columns=["created_at", "run_file", "question_id", "question", "retriever_contexts", "reranker_contexts"],
-            ),
+            retrieval_rows,
             leading_columns=[
                 "created_at",
                 "run_file",
+                "json_file",
                 "question_id",
                 "question",
                 "retriever_contexts",
                 "reranker_contexts",
             ],
         )
-        logger.info("metrics_finished output=%s", summary_path)
+        append_json_rows(summary_json_path, "retrieval", retrieval_rows)
+        logger.info("metrics_finished output=%s json=%s", summary_path, summary_json_path)
         return summary_path
 
     def latest_run_file(self) -> Path:
@@ -197,6 +202,8 @@ class MetricsCalculator:
             "answer": row.get("answer"),
             "retriever_contexts": row.get("retriever_contexts"),
             "reranker_contexts": row.get("reranker_contexts"),
+            "retriever_context_count": len(contexts_from_json(row.get("retriever_contexts"))),
+            "reranker_context_count": len(contexts_from_json(row.get("reranker_contexts"))),
             "has_error": bool(row.get("error")) if not pd.isna(row.get("error")) else False,
         }
         expected_answer = ground_truth
@@ -242,13 +249,26 @@ class MetricsCalculator:
             row.update(result.metrics)
             row["ragas_error"] = result.error
 
-    def _summary(self, details: pd.DataFrame, run_path: Path) -> dict[str, Any]:
+    def _summary(
+        self,
+        details: pd.DataFrame,
+        run_frame: pd.DataFrame,
+        run_path: Path,
+        data_path: Path,
+    ) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "run_file": str(run_path),
+            "json_file": str(data_path),
             "question_count": len(details),
             "error_count": int(details["has_error"].sum()) if "has_error" in details else 0,
         }
+        if len(run_frame):
+            first = run_frame.iloc[0]
+            for column in _run_parameter_columns:
+                value = first.get(column)
+                if _has_value(value):
+                    summary[column] = value
         judge_score = _judge_score_mean(details)
         if judge_score is not None:
             summary["ragas_judge_score_mean"] = judge_score
@@ -266,6 +286,36 @@ class MetricsCalculator:
 
 def _has_text(value: Any) -> bool:
     return value is not None and not (isinstance(value, float) and pd.isna(value)) and bool(str(value).strip())
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, float) and pd.isna(value):
+        return False
+    return True
+
+
+_run_parameter_columns = (
+    "pipeline_factory",
+    "model_name",
+    "temperature",
+    "judge_model_name",
+    "judge_temperature",
+    "k_rrf",
+    "fusion_method",
+    "alpha",
+    "bias",
+    "rerank_initial_k",
+    "retriever_top_k",
+    "rag_context_source",
+    "rag_max_contexts",
+    "judge_backend",
+    "judge_context_source",
+    "judge_max_context_chars",
+    "retriever_init_kwargs",
+    "retriever_search_kwargs",
+)
 
 
 def _ground_truth(row: pd.Series) -> Any:
