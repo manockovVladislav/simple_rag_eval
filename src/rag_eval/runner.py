@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,7 +9,7 @@ import pandas as pd
 
 from rag_eval.config import AppConfig
 from rag_eval.generation import RagAnswerGenerator
-from rag_eval.io import contexts_to_json, read_table, write_run_json, write_xlsx
+from rag_eval.io import contexts_to_json, read_table, to_json_text, write_run_json, write_xlsx
 from rag_eval.logging_utils import setup_file_logger
 from rag_eval.pipeline import load_pipeline
 from rag_eval.schemas import PipelineResult
@@ -106,7 +105,7 @@ class EvaluationRunner:
         for row in rows:
             excel_row = {"json_file": str(json_path), **row}
             for column in ("retriever_contexts", "reranker_contexts", "pipeline_metadata"):
-                excel_row[column] = json.dumps(excel_row[column], ensure_ascii=False)
+                excel_row[column] = to_json_text(excel_row[column])
             excel_rows.append(excel_row)
         write_xlsx(run_path, {"results": pd.DataFrame(excel_rows)})
         logger.info("run_finished output=%s json=%s", run_path, json_path)

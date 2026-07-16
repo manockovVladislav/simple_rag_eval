@@ -43,3 +43,26 @@ class RunIoTests(unittest.TestCase):
             frame, source_path = read_run_table(xlsx_path)
             self.assertEqual(source_path, json_path)
             self.assertEqual(frame.loc[0, "question_id"], 7)
+
+    def test_json_replaces_invalid_unicode_context_with_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            xlsx_path = Path(directory) / "rag_run_test.xlsx"
+            json_path = xlsx_path.with_suffix(".json")
+            rows = [{"retriever_contexts": [{"text": "valid emoji 😊"}, {"text": "bad \ud800 text"}]}]
+
+            write_run_json(json_path, rows, xlsx_path)
+
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            contexts = payload["results"][0]["retriever_contexts"]
+            self.assertEqual(contexts[0]["text"], "valid emoji 😊")
+            self.assertIn("UnicodeEncodeError", contexts[1]["text"]["serialization_error"])
+            self.assertIn("Traceback", contexts[1]["text"]["traceback"])
+
+    def test_xlsx_replaces_xml_control_characters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            xlsx_path = Path(directory) / "rag_run_test.xlsx"
+
+            write_xlsx(xlsx_path, {"results": pd.DataFrame([{"answer": "hello\x00world 😊"}])})
+
+            frame = pd.read_excel(xlsx_path)
+            self.assertEqual(frame.loc[0, "answer"], "hello�world 😊")

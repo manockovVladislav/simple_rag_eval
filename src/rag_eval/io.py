@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import re
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ from rag_eval.schemas import ContextItem
 
 EXCEL_MAX_CELL_LENGTH = 32_767
 EXCEL_TRUNCATION_MARKER = "\n… [полное значение сохранено в JSON]"
+EXCEL_ILLEGAL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
 
 
 def read_table(path: Path) -> pd.DataFrame:
@@ -154,37 +157,92 @@ def _excel_safe_frame(frame: pd.DataFrame) -> pd.DataFrame:
 def _excel_safe_value(value: Any) -> Any:
     if isinstance(value, (dict, list, tuple)):
         value = json.dumps(_json_safe(value), ensure_ascii=False, allow_nan=False)
+    if isinstance(value, str):
+        value = EXCEL_ILLEGAL_CHARACTERS.sub("�", value)
     if not isinstance(value, str) or len(value) <= EXCEL_MAX_CELL_LENGTH:
         return value
     available = EXCEL_MAX_CELL_LENGTH - len(EXCEL_TRUNCATION_MARKER)
     return value[:available] + EXCEL_TRUNCATION_MARKER
 
 
-def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        return None if math.isnan(value) or math.isinf(value) else value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if hasattr(value, "item"):
-        return _json_safe(value.item())
+def _json_safe(value: Any, seen: set[int] | None = None) -> Any:
+    """Convert a value to JSON data, replacing only broken values with diagnostics."""
+    if seen is None:
+        seen = set()
     try:
-        if pd.isna(value):
-            return None
-    except (TypeError, ValueError):
-        pass
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+        if value is None or isinstance(value, (bool, int)):
+            return value
+        if isinstance(value, str):
+            # json.dumps accepts lone surrogates, but a subsequent UTF-8 write does not.
+            value.encode("utf-8")
+            return value
+        if isinstance(value, float):
+            return None if math.isnan(value) or math.isinf(value) else value
+        if isinstance(value, Path):
+            return _json_safe(str(value), seen)
+        if isinstance(value, (date, datetime)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            identity = id(value)
+            if identity in seen:
+                raise ValueError("Circular reference detected while serializing JSON")
+            seen.add(identity)
+            try:
+                result: dict[str, Any] = {}
+                for key, item in value.items():
+                    safe_key = _json_key(key)
+                    result[safe_key] = _json_safe(item, seen)
+                return result
+            finally:
+                seen.remove(identity)
+        if isinstance(value, (list, tuple)):
+            identity = id(value)
+            if identity in seen:
+                raise ValueError("Circular reference detected while serializing JSON")
+            seen.add(identity)
+            try:
+                return [_json_safe(item, seen) for item in value]
+            finally:
+                seen.remove(identity)
+        if hasattr(value, "item"):
+            return _json_safe(value.item(), seen)
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+    except Exception as exc:
+        return _serialization_error(exc)
+
+
+def _json_key(value: Any) -> str:
+    try:
+        key = str(value)
+        key.encode("utf-8")
+        return key
+    except Exception as exc:
+        error = _serialization_error(exc)
+        return f"__serialization_error__: {error['serialization_error']}"
+
+
+def _serialization_error(exc: Exception) -> dict[str, str]:
+    def utf8_safe(text: str) -> str:
+        return text.encode("utf-8", errors="replace").decode("utf-8")
+
+    return {
+        "serialization_error": utf8_safe(f"{type(exc).__name__}: {exc}"),
+        "traceback": utf8_safe(traceback.format_exc()),
+    }
+
+
+def to_json_text(value: Any, *, indent: int | None = None) -> str:
+    """Serialize arbitrary application data without letting one bad value abort a run."""
+    return json.dumps(_json_safe(value), ensure_ascii=False, indent=indent, allow_nan=False)
 
 
 def contexts_to_json(contexts: list[ContextItem]) -> str:
-    return json.dumps([item.to_record() for item in contexts], ensure_ascii=False)
+    return to_json_text([item.to_record() for item in contexts])
 
 
 def contexts_from_json(value: Any) -> list[dict[str, Any]]:
