@@ -87,7 +87,13 @@ SLEEP_SECONDS = 0
 # RAG_LLM_PROVIDER и RAGAS_JUDGE_PROVIDER можно выставлять независимо:
 # например, RAG_LLM_PROVIDER = "gigachat", RAGAS_JUDGE_PROVIDER = "qwen".
 RAG_ANSWER_ENABLED = True
-RAG_LLM_PROVIDER = "qwen"
+# Первый provider остается основным: его ответ также пишется в старую колонку `answer`.
+RAG_LLM_PROVIDER = "gigachat"
+# Параллельный тест: один и тот же набор чанков одновременно уходит во все три модели.
+# Чтобы вернуться к старому режиму, достаточно поставить False; RAG_LLM_PROVIDER продолжит работать как раньше.
+RAG_PARALLEL_GENERATION_ENABLED = True
+RAG_LLM_PROVIDERS = ["gigachat", "qwen", "glm"]
+RAG_GENERATION_MAX_WORKERS = 3
 RAG_CONTEXT_SOURCE = "retriever"
 RAG_MAX_CONTEXTS = 10
 RAG_SYSTEM_PROMPT = (
@@ -132,11 +138,21 @@ BGE_M3_LOCAL_FILES_ONLY = True
 BGE_M3_DEVICE = "cpu"
 BGE_M3_NORMALIZE_EMBEDDINGS = True
 
-# Локальный Qwen через transformers.
+# Qwen API. По умолчанию используется тот же протокол и адрес, что у GigaChat.
+# Если ваш Qwen endpoint OpenAI-compatible, поставьте QWEN_PROVIDER = "openai_compatible",
+# укажите полный QWEN_BASE_URL до /chat/completions и QWEN_AUTH_TYPE = "bearer"/"bearer_env".
+# Старый локальный режим также сохранен: QWEN_PROVIDER = "qwen_transformers" и QWEN_MODEL_PATH.
 #
 # В закрытом контуре указывай только локальный путь.
 # QWEN_LOCAL_FILES_ONLY = True запрещает transformers скачивать модель из интернета.
-QWEN_PROVIDER = "qwen_transformers"
+QWEN_PROVIDER = "gigachat_api"
+QWEN_BASE_URL = os.getenv("QWEN_BASE_URL", "https://gigachat.devices.sberbank.ru/api/v1")
+QWEN_ACCESS_TOKEN = os.getenv("QWEN_ACCESS_TOKEN", os.getenv("GIGACHAT_ACCESS_TOKEN", ""))
+QWEN_API_KEY_ENV = "QWEN_API_KEY"
+QWEN_AUTH_TYPE = "none"
+QWEN_MODEL = os.getenv("QWEN_MODEL", "Qwen")
+QWEN_VERIFY_SSL = False
+QWEN_MIN_SECONDS_BETWEEN_REQUESTS = 0
 QWEN_MODEL_PATH = "models/Qwen3-14B"
 QWEN_TASK = "text-generation"
 QWEN_DEVICE = None
@@ -158,6 +174,21 @@ GIGACHAT_ACCESS_TOKEN = os.getenv("GIGACHAT_ACCESS_TOKEN", "")
 GIGACHAT_MODEL = "GigaChat"
 GIGACHAT_TEMPERATURE = 0
 GIGACHAT_VERIFY_SSL = False
+
+# --- GLM API ---
+# По умолчанию использует GigaChat-compatible API. Для OpenAI-compatible API
+# поменяйте GLM_PROVIDER/GLM_AUTH_TYPE по аналогии с комментарием в блоке Qwen.
+GLM_PROVIDER = "gigachat_api"
+GLM_BASE_URL = os.getenv("GLM_BASE_URL", GIGACHAT_BASE_URL)
+GLM_ACCESS_TOKEN = os.getenv("GLM_ACCESS_TOKEN", GIGACHAT_ACCESS_TOKEN)
+GLM_API_KEY_ENV = "GLM_API_KEY"
+GLM_AUTH_TYPE = "none"
+GLM_MODEL = os.getenv("GLM_MODEL", "GLM")
+GLM_TIMEOUT_SECONDS = 60
+GLM_TEMPERATURE = 0
+GLM_VERIFY_SSL = False
+GLM_MIN_SECONDS_BETWEEN_REQUESTS = 0
+GLM_MAX_NEW_TOKENS = 1024
 
 # --- GigaChat: рабочий изолированный контур ---
 # Когда будешь запускать в рабочем контуре, закомментируй домашний блок выше

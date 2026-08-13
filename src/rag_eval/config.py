@@ -46,6 +46,9 @@ class RunConfig:
 class GenerationConfig:
     enabled: bool = True
     provider: str = "qwen"
+    providers: list[str] = field(default_factory=list)
+    parallel: bool = False
+    max_workers: int = 3
     context_source: str = "reranker"
     max_contexts: int = 10
     system_prompt: str = (
@@ -213,6 +216,9 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "generation": {
             "enabled": getattr(module, "RAG_ANSWER_ENABLED", True),
             "provider": getattr(module, "RAG_LLM_PROVIDER", "qwen"),
+            "providers": getattr(module, "RAG_LLM_PROVIDERS", []),
+            "parallel": getattr(module, "RAG_PARALLEL_GENERATION_ENABLED", False),
+            "max_workers": getattr(module, "RAG_GENERATION_MAX_WORKERS", 3),
             "context_source": getattr(module, "RAG_CONTEXT_SOURCE", "reranker"),
             "max_contexts": getattr(module, "RAG_MAX_CONTEXTS", 10),
             "system_prompt": getattr(
@@ -242,10 +248,15 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         "models": {
             "qwen": {
                 "provider": getattr(module, "QWEN_PROVIDER", "qwen_transformers"),
-                "model": getattr(module, "QWEN_MODEL_PATH", getattr(module, "QWEN_MODEL", "models/Qwen3-14B")),
-                "auth_type": "none",
+                "model": getattr(module, "QWEN_MODEL", getattr(module, "QWEN_MODEL_PATH", "models/Qwen3-14B")),
+                "base_url": getattr(module, "QWEN_BASE_URL", ""),
+                "access_token": getattr(module, "QWEN_ACCESS_TOKEN", ""),
+                "api_key_env": getattr(module, "QWEN_API_KEY_ENV", ""),
+                "auth_type": getattr(module, "QWEN_AUTH_TYPE", "none"),
                 "timeout_seconds": getattr(module, "QWEN_TIMEOUT_SECONDS", 60),
                 "temperature": getattr(module, "QWEN_TEMPERATURE", 0),
+                "verify_ssl": getattr(module, "QWEN_VERIFY_SSL", True),
+                "min_seconds_between_requests": getattr(module, "QWEN_MIN_SECONDS_BETWEEN_REQUESTS", 0),
                 "task": getattr(module, "QWEN_TASK", "text-generation"),
                 "device": getattr(module, "QWEN_DEVICE", None),
                 "device_map": getattr(module, "QWEN_DEVICE_MAP", "auto"),
@@ -274,6 +285,19 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "temperature": getattr(module, "GIGACHAT_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "GIGACHAT_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS", 10),
+            },
+            "glm": {
+                "provider": getattr(module, "GLM_PROVIDER", "openai_compatible"),
+                "base_url": getattr(module, "GLM_BASE_URL", ""),
+                "access_token": getattr(module, "GLM_ACCESS_TOKEN", ""),
+                "api_key_env": getattr(module, "GLM_API_KEY_ENV", ""),
+                "auth_type": getattr(module, "GLM_AUTH_TYPE", "none"),
+                "model": getattr(module, "GLM_MODEL", "glm"),
+                "timeout_seconds": getattr(module, "GLM_TIMEOUT_SECONDS", 60),
+                "temperature": getattr(module, "GLM_TEMPERATURE", 0),
+                "verify_ssl": getattr(module, "GLM_VERIFY_SSL", True),
+                "min_seconds_between_requests": getattr(module, "GLM_MIN_SECONDS_BETWEEN_REQUESTS", 0),
+                "max_new_tokens": getattr(module, "GLM_MAX_NEW_TOKENS", 1024),
             },
         },
     }

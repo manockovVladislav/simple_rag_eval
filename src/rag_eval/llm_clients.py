@@ -26,6 +26,7 @@ class OpenAICompatibleClient:
             "model": self.config.model,
             "messages": [_message_to_dict(message) for message in messages],
             "temperature": self.config.temperature,
+            "max_tokens": self.config.max_new_tokens,
         }
         response = requests.post(
             self.config.base_url,
@@ -44,6 +45,8 @@ class OpenAICompatibleClient:
             api_key = os.getenv(self.config.api_key_env, "")
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
+        elif self.config.auth_type == "bearer" and self.config.access_token:
+            headers["Authorization"] = f"Bearer {self.config.access_token}"
         return headers
 
 

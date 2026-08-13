@@ -6,7 +6,7 @@
 
 1. Читает вопросы из `data/golden_questions.xlsx`.
 2. Запускает выбранный pipeline из `config.py`.
-3. После retriever/reranker отправляет контекст в выбранную RAG LLM и сохраняет ответ.
+3. После retriever/reranker отправляет один и тот же контекст в одну модель или асинхронно в GigaChat, Qwen и GLM.
 4. Сохраняет ответы и контексты в пару `outputs/runs/rag_run_*.xlsx` + `rag_run_*.json`.
 5. Считает top-k метрики по размеченным chunk id и judge-метрики по финальному ответу.
 6. Дописывает результат в `outputs/metrics/metrics_summary.xlsx` и `metrics_summary.json`.
@@ -110,9 +110,22 @@ RETRIEVER_TOP_K = 10
 
 ```python
 RAG_ANSWER_ENABLED = True
-RAG_LLM_PROVIDER = "qwen"
+RAG_LLM_PROVIDER = "gigachat"
+RAG_PARALLEL_GENERATION_ENABLED = True
+RAG_LLM_PROVIDERS = ["gigachat", "qwen", "glm"]
+RAG_GENERATION_MAX_WORKERS = 3
 RAG_CONTEXT_SOURCE = "reranker"
 RAG_MAX_CONTEXTS = 10
+```
+
+`RAG_LLM_PROVIDER` — основная модель: её ответ дублируется в старую колонку `answer` для обратной
+совместимости. Ответы трёх моделей пишутся в `answer_gigachat`, `answer_qwen`, `answer_glm`.
+Ошибка одного API сохраняется в `error_<provider>` и не отменяет два остальных ответа.
+
+Старый режим включается одной строкой:
+
+```python
+RAG_PARALLEL_GENERATION_ENABLED = False
 ```
 
 Судья настраивается отдельно:
@@ -143,6 +156,11 @@ GIGACHAT_ACCESS_TOKEN = "..."
 GIGACHAT_MODEL = "GigaChat"
 GIGACHAT_TEMPERATURE = 0
 ```
+
+Qwen и GLM могут работать через тот же GigaChat-compatible API (`*_PROVIDER = "gigachat_api"`)
+или через OpenAI-compatible endpoint (`*_PROVIDER = "openai_compatible"`). Во втором случае
+`*_BASE_URL` должен содержать полный URL `.../chat/completions`; авторизация задаётся
+через `*_AUTH_TYPE = "none"`, `"bearer"` или `"bearer_env"`.
 
 Ограничение закрытого контура:
 
@@ -256,6 +274,10 @@ JSON — полный источник данных без лимита длин
 - `questions` - вопрос, ответ, эталон, контексты, ошибки, причины и evidence по judge-метрикам.
 - `judge_debug` - технические raw-ответы судьи и ошибки парсинга/вызова.
 - `retrieval` - retrieval-контексты и top-k метрики.
+
+В мультимодельном режиме на листе `details` рядом с каждым вопросом появляются
+`answer_<provider>`, локальные `answer_<provider>_*` и оценки неизменённого GigaChat-судьи
+`ragas_<provider>_*`.
 
 Основные метрики:
 

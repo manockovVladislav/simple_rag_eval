@@ -40,6 +40,8 @@ class EvaluationRunner:
         pipeline = self.pipeline or load_pipeline(self.config)
         run_parameters = self._run_parameters(pipeline)
         generator = RagAnswerGenerator(self.config) if self.config.generation.enabled else None
+        generation_providers = self._generation_providers()
+        multi_generation = self.config.generation.parallel and len(generation_providers) > 1
         rows: list[dict[str, Any]] = []
 
         logger.info("run_started questions=%s pipeline=%s", len(questions), type(pipeline).__name__)
@@ -51,6 +53,7 @@ class EvaluationRunner:
             relevant_chunk_ids = self._relevant_chunk_ids(row)
             started_at = datetime.now().isoformat(timespec="seconds")
             error = None
+            model_outputs: dict[str, dict[str, str | None]] = {}
             result = PipelineResult()
             try:
                 logger.info("question_started question_id=%s question=%s", question_id, question)
@@ -62,7 +65,23 @@ class EvaluationRunner:
                     contexts_to_json(result.retriever_contexts),
                     contexts_to_json(result.reranker_contexts),
                 )
-                if generator is not None and not result.answer:
+                if generator is not None and multi_generation:
+                    generation_contexts = generator.contexts_for_generation(result)
+                    logger.info(
+                        "rag_llm_parallel_request question_id=%s providers=%s contexts=%s",
+                        question_id,
+                        generation_providers,
+                        contexts_to_json(generation_contexts),
+                    )
+                    model_outputs = generator.generate_many(question, result)
+                    primary_provider = (
+                        self.config.generation.provider
+                        if self.config.generation.provider in model_outputs
+                        else generation_providers[0]
+                    )
+                    result.answer = model_outputs[primary_provider]["answer"]
+                    logger.info("rag_llm_parallel_response question_id=%s outputs=%s", question_id, model_outputs)
+                elif generator is not None and not result.answer:
                     generation_contexts = generator.contexts_for_generation(result)
                     logger.info(
                         "rag_llm_request question_id=%s provider=%s contexts=%s",
@@ -76,25 +95,29 @@ class EvaluationRunner:
                 error = f"{type(exc).__name__}: {exc}"
                 logger.exception("question_failed question_id=%s", question_id)
 
-            rows.append(
-                {
-                    "question_id": question_id,
-                    "question": question,
-                    "ground_truth": ground_truth,
-                    "expected_answer": ground_truth,
-                    "relevant_chunk_ids": relevant_chunk_ids,
-                    "answer": result.answer,
-                    "retriever_contexts": [item.to_record() for item in result.retriever_contexts],
-                    "reranker_contexts": [item.to_record() for item in result.reranker_contexts],
-                    "retriever_context_count": len(result.retriever_contexts),
-                    "reranker_context_count": len(result.reranker_contexts),
-                    "pipeline_metadata": result.metadata,
-                    **run_parameters,
-                    "error": error,
-                    "started_at": started_at,
-                    "finished_at": datetime.now().isoformat(timespec="seconds"),
-                }
-            )
+            output_row = {
+                "question_id": question_id,
+                "question": question,
+                "ground_truth": ground_truth,
+                "expected_answer": ground_truth,
+                "relevant_chunk_ids": relevant_chunk_ids,
+                "answer": result.answer,
+                "retriever_contexts": [item.to_record() for item in result.retriever_contexts],
+                "reranker_contexts": [item.to_record() for item in result.reranker_contexts],
+                "retriever_context_count": len(result.retriever_contexts),
+                "reranker_context_count": len(result.reranker_contexts),
+                "pipeline_metadata": result.metadata,
+                **run_parameters,
+                "error": error,
+                "started_at": started_at,
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            if multi_generation:
+                for provider in generation_providers:
+                    provider_output = model_outputs.get(provider, {})
+                    output_row[f"answer_{provider}"] = provider_output.get("answer")
+                    output_row[f"error_{provider}"] = provider_output.get("error")
+            rows.append(output_row)
             if self.config.run.sleep_seconds:
                 time.sleep(self.config.run.sleep_seconds)
 
@@ -128,6 +151,8 @@ class EvaluationRunner:
         return {
             "pipeline_factory": self.config.pipeline.factory,
             "model_name": generation_model.model if generation_model else None,
+            "generation_providers": self._generation_providers(),
+            "parallel_generation": self.config.generation.parallel,
             "temperature": generation_model.temperature if generation_model else None,
             "judge_model_name": judge_model.model if judge_model else None,
             "judge_temperature": 0.0 if self.config.metrics.ragas_backend == "custom" else (
@@ -147,6 +172,11 @@ class EvaluationRunner:
             "retriever_init_kwargs": init,
             "retriever_search_kwargs": search,
         }
+
+    def _generation_providers(self) -> list[str]:
+        providers = self.config.generation.providers or [self.config.generation.provider]
+        # Preserve config order while preventing duplicate calls/columns.
+        return list(dict.fromkeys(provider for provider in providers if provider))
 
     def _validate_questions(self, questions: pd.DataFrame) -> pd.DataFrame:
         question_column = self.config.golden_columns.question
