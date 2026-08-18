@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from rag_eval.io import EXCEL_MAX_CELL_LENGTH, read_run_table, write_run_json, write_xlsx
+from rag_eval.io import (
+    EXCEL_MAX_CELL_LENGTH,
+    read_model_run_tables,
+    read_run_table,
+    write_model_run_json,
+    write_run_json,
+    write_xlsx,
+)
 
 
 class RunIoTests(unittest.TestCase):
@@ -66,3 +73,25 @@ class RunIoTests(unittest.TestCase):
 
             frame = pd.read_excel(xlsx_path)
             self.assertEqual(frame.loc[0, "answer"], "hello�world 😊")
+
+    def test_each_model_answer_is_saved_to_its_own_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            xlsx_path = root / "rag_run_test.xlsx"
+            giga_path = root / "rag_run_test_gigachat.json"
+            qwen_path = root / "rag_run_test_qwen.json"
+            write_model_run_json(giga_path, [{"question_id": 1, "answer": "giga"}], xlsx_path, "gigachat")
+            write_model_run_json(qwen_path, [{"question_id": 1, "answer": "qwen"}], xlsx_path, "qwen")
+            write_xlsx(
+                xlsx_path,
+                {"results": pd.DataFrame([{
+                    "json_file_gigachat": str(giga_path),
+                    "json_file_qwen": str(qwen_path),
+                }])},
+            )
+
+            runs = read_model_run_tables(xlsx_path, ["gigachat", "qwen", "glm"])
+
+            self.assertEqual(set(runs), {"gigachat", "qwen"})
+            self.assertEqual(runs["gigachat"][0].loc[0, "answer"], "giga")
+            self.assertEqual(runs["qwen"][0].loc[0, "answer"], "qwen")

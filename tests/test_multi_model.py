@@ -7,7 +7,7 @@ import pandas as pd
 
 from rag_eval.config import AppConfig, GenerationConfig, MetricsConfig
 from rag_eval.generation import RagAnswerGenerator
-from rag_eval.metrics import MetricsCalculator, _provider_judge_column
+from rag_eval.metrics import MetricsCalculator, _combine_model_run_frames, _provider_judge_column
 from rag_eval.schemas import ContextItem, PipelineResult
 
 
@@ -86,6 +86,31 @@ class MultiModelGenerationTests(unittest.TestCase):
             _provider_judge_column("ragas_faithfulness_reason", "glm"),
             "ragas_glm_faithfulness_reason",
         )
+
+    def test_saved_model_frames_are_combined_without_losing_answers(self) -> None:
+        common = {
+            "question_id": [1],
+            "question": ["Q"],
+            "ground_truth": ["A"],
+            "retriever_contexts": [[{"text": "C"}]],
+        }
+        runs = {
+            provider: (
+                pd.DataFrame({**common, "answer": [answer], "generation_error": [None]}),
+                None,
+            )
+            for provider, answer in (
+                ("gigachat", "G"),
+                ("qwen", "QW"),
+                ("glm", "GL"),
+            )
+        }
+
+        frame = _combine_model_run_frames(runs, "gigachat")
+
+        self.assertEqual(frame.loc[0, "answer"], "G")
+        self.assertEqual(frame.loc[0, "answer_qwen"], "QW")
+        self.assertEqual(frame.loc[0, "answer_glm"], "GL")
 
 
 if __name__ == "__main__":

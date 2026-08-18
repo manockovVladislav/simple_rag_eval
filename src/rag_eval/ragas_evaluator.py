@@ -199,9 +199,7 @@ class RagasEvaluator:
         if provider not in self.config.models:
             raise ValueError(f"Ragas judge provider '{provider}' is not configured.")
         model_config = self.config.models[provider]
-        if model_config.provider == "qwen_transformers":
-            self._langchain_llm = _make_transformers_llm(model_config)
-        elif model_config.provider == "gigachat_api" or provider == "gigachat":
+        if model_config.provider == "gigachat_api" or provider == "gigachat":
             self._langchain_llm = _make_gigachat_langchain_llm(model_config)
         else:
             self._langchain_llm = _make_openai_compatible_llm(model_config)
@@ -261,36 +259,6 @@ def _make_gigachat_langchain_llm(model_config: ModelConfig):
     return SafeGigaChatForRagas(client=client)
 
 
-def _make_transformers_llm(model_config: ModelConfig):
-    from langchain_community.llms import HuggingFacePipeline
-
-    model_kwargs: dict[str, Any] = {}
-    if model_config.device_map:
-        model_kwargs["device_map"] = model_config.device_map
-    if model_config.torch_dtype:
-        model_kwargs["torch_dtype"] = model_config.torch_dtype
-    if model_config.local_files_only:
-        model_kwargs["local_files_only"] = True
-
-    pipeline_kwargs = {
-        "max_new_tokens": model_config.max_new_tokens,
-        "do_sample": model_config.do_sample,
-        "temperature": model_config.temperature,
-        "return_full_text": model_config.return_full_text,
-    }
-
-    kwargs: dict[str, Any] = {
-        "model_id": model_config.model,
-        "task": model_config.task,
-        "model_kwargs": model_kwargs,
-        "pipeline_kwargs": pipeline_kwargs,
-        "batch_size": 1,
-    }
-    if model_config.device is not None:
-        kwargs["device"] = model_config.device
-    return HuggingFacePipeline.from_model_id(**kwargs)
-
-
 def _rate_limiter(model_config: ModelConfig):
     if model_config.min_seconds_between_requests <= 0:
         return None
@@ -304,7 +272,7 @@ def _rate_limiter(model_config: ModelConfig):
 
 
 def _api_key(config: ModelConfig) -> str:
-    if config.provider == "qwen_local" or config.auth_type == "none":
+    if config.auth_type == "none":
         return "EMPTY"
     if config.auth_type == "bearer_env" and config.api_key_env:
         return os.getenv(config.api_key_env, "")

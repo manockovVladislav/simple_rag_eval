@@ -7,9 +7,9 @@
 1. Читает вопросы из `data/golden_questions.xlsx`.
 2. Запускает выбранный pipeline из `config.py`.
 3. После retriever/reranker отправляет один и тот же контекст в одну модель или асинхронно в GigaChat, Qwen и GLM.
-4. Сохраняет ответы и контексты в пару `outputs/runs/rag_run_*.xlsx` + `rag_run_*.json`.
-5. Считает top-k метрики по размеченным chunk id и judge-метрики по финальному ответу.
-6. Дописывает результат в `outputs/metrics/metrics_summary.xlsx` и `metrics_summary.json`.
+4. Сохраняет ответы в три независимых JSON: `*_gigachat.json`, `*_qwen.json`, `*_glm.json`.
+5. Судья последовательно читает сохранённый JSON каждой модели и считает её метрики.
+6. Сохраняет широкую сравнительную таблицу в `outputs/metrics/model_comparison.xlsx`.
 
 ## Установка
 
@@ -131,36 +131,30 @@ RAG_PARALLEL_GENERATION_ENABLED = False
 Судья настраивается отдельно:
 
 ```python
-RAGAS_BACKEND = "ragas"
-RAGAS_JUDGE_PROVIDER = "qwen"
-```
-
-## Qwen И GigaChat
-
-Qwen запускается только локально через `transformers`:
-
-```python
-RAGAS_JUDGE_PROVIDER = "qwen"
-QWEN_MODEL_PATH = "models/Qwen3-14B"
-QWEN_LOCAL_FILES_ONLY = True
-```
-
-GigaChat получает только четыре параметра:
-
-```python
 RAGAS_BACKEND = "custom"
 RAGAS_JUDGE_PROVIDER = "gigachat"
-RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
-GIGACHAT_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+```
+
+## GigaChat, Qwen и GLM
+
+Все три модели вызываются через один GigaChat-compatible API. Локального Qwen в коде нет:
+
+```python
+GIGACHAT_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
 GIGACHAT_ACCESS_TOKEN = "..."
 GIGACHAT_MODEL = "GigaChat"
 GIGACHAT_TEMPERATURE = 0
-```
 
-Qwen и GLM могут работать через тот же GigaChat-compatible API (`*_PROVIDER = "gigachat_api"`)
-или через OpenAI-compatible endpoint (`*_PROVIDER = "openai_compatible"`). Во втором случае
-`*_BASE_URL` должен содержать полный URL `.../chat/completions`; авторизация задаётся
-через `*_AUTH_TYPE = "none"`, `"bearer"` или `"bearer_env"`.
+QWEN_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
+QWEN_ACCESS_TOKEN = "..."
+QWEN_MODEL = "Qwen"
+QWEN_TEMPERATURE = 0
+
+GLM_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
+GLM_ACCESS_TOKEN = "..."
+GLM_MODEL = "GLM"
+GLM_TEMPERATURE = 0
+```
 
 Ограничение закрытого контура:
 
@@ -198,7 +192,9 @@ python scripts/run_questions.py --config config.py
 
 ```text
 outputs/runs/rag_run_*.xlsx
-outputs/runs/rag_run_*.json
+outputs/runs/rag_run_*_gigachat.json
+outputs/runs/rag_run_*_qwen.json
+outputs/runs/rag_run_*_glm.json
 ```
 
 ## Полный Запуск
@@ -249,7 +245,9 @@ Run-файлы:
 
 ```text
 outputs/runs/rag_run_*.xlsx
-outputs/runs/rag_run_*.json
+outputs/runs/rag_run_*_gigachat.json
+outputs/runs/rag_run_*_qwen.json
+outputs/runs/rag_run_*_glm.json
 ```
 
 Итоговые метрики:
@@ -257,10 +255,15 @@ outputs/runs/rag_run_*.json
 ```text
 outputs/metrics/metrics_summary.xlsx
 outputs/metrics/metrics_summary.json
+outputs/metrics/model_comparison.xlsx
 ```
 
-JSON — полный источник данных без лимита длины ячейки Excel. В Excel есть колонка `json_file`;
-при расчёте метрик по `.xlsx` система автоматически читает полные строки из парного JSON.
+В `model_comparison.xlsx` одна строка соответствует одному вопросу. Сначала идут `date`, `question`,
+`context`, `correct_answer`, затем для каждой модели её `answer_<model>` и колонки
+`metric_<model>_*`.
+
+JSON — полный источник данных без лимита длины ячейки Excel. В run-Excel есть отдельная
+колонка `json_file_<provider>` для каждой модели. При расчёте метрик судья по очереди читает эти JSON.
 Каждый run также хранит snapshot параметров. В `metrics_summary` выводятся `model_name`, `temperature`,
 `judge_model_name`, `judge_temperature`, `k_rrf`, `fusion_method`, `alpha`, `bias`, `rerank_initial_k`,
 `retriever_top_k`, а также средние `retriever_context_count_mean` и `reranker_context_count_mean`.

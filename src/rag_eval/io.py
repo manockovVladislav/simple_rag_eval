@@ -57,6 +57,34 @@ def read_run_table(path: Path) -> tuple[pd.DataFrame, Path]:
     return frame, path
 
 
+def read_model_run_tables(path: Path, providers: list[str]) -> dict[str, tuple[pd.DataFrame, Path]]:
+    """Load the independently persisted answer JSON for every configured model."""
+    if path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        provider = payload.get("provider") if isinstance(payload, dict) else None
+        if provider:
+            return {str(provider): (read_table(path), path)}
+
+    preview = read_table(path) if path.suffix.lower() != ".json" else pd.DataFrame()
+    result: dict[str, tuple[pd.DataFrame, Path]] = {}
+    for provider in providers:
+        candidates: list[Path] = []
+        column = f"json_file_{provider}"
+        if column in preview and len(preview):
+            value = preview.iloc[0].get(column)
+            if isinstance(value, str) and value.strip():
+                configured = Path(value.strip())
+                candidates.append(configured)
+                if not configured.is_absolute():
+                    candidates.append(path.parent / configured)
+        candidates.append(path.with_name(f"{path.stem}_{provider}.json"))
+        for candidate in candidates:
+            if candidate.exists():
+                result[provider] = (read_table(candidate), candidate)
+                break
+    return result
+
+
 def write_xlsx(path: Path, sheets: dict[str, pd.DataFrame]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
@@ -75,6 +103,26 @@ def write_run_json(
         {
             "format_version": 1,
             "type": "rag_run",
+            "xlsx_file": str(xlsx_path),
+            "parameters": parameters or {},
+            "results": rows,
+        },
+    )
+
+
+def write_model_run_json(
+    path: Path,
+    rows: list[dict[str, Any]],
+    xlsx_path: Path,
+    provider: str,
+    parameters: dict[str, Any] | None = None,
+) -> None:
+    write_json(
+        path,
+        {
+            "format_version": 2,
+            "type": "rag_model_run",
+            "provider": provider,
             "xlsx_file": str(xlsx_path),
             "parameters": parameters or {},
             "results": rows,

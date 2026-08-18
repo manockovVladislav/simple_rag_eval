@@ -77,52 +77,10 @@ class GigaChatLangChainClient:
         return self._client
 
 
-class TransformersLangChainClient:
-    def __init__(self, config: ModelConfig):
-        self.config = config
-        self._client = None
-
-    def chat(self, messages: list[ChatMessage | dict[str, Any]]) -> str:
-        return str(self._model().invoke(_messages_to_prompt(messages))).strip()
-
-    def _model(self):
-        if self._client is None:
-            from langchain_community.llms import HuggingFacePipeline
-
-            model_kwargs: dict[str, Any] = {}
-            if self.config.device_map:
-                model_kwargs["device_map"] = self.config.device_map
-            if self.config.torch_dtype:
-                model_kwargs["torch_dtype"] = self.config.torch_dtype
-            if self.config.local_files_only:
-                model_kwargs["local_files_only"] = True
-
-            pipeline_kwargs = {
-                "max_new_tokens": self.config.max_new_tokens,
-                "do_sample": self.config.do_sample,
-                "temperature": self.config.temperature,
-                "return_full_text": self.config.return_full_text,
-            }
-
-            kwargs: dict[str, Any] = {
-                "model_id": self.config.model,
-                "task": self.config.task,
-                "model_kwargs": model_kwargs,
-                "pipeline_kwargs": pipeline_kwargs,
-                "batch_size": 1,
-            }
-            if self.config.device is not None:
-                kwargs["device"] = self.config.device
-            self._client = HuggingFacePipeline.from_model_id(**kwargs)
-        return self._client
-
-
 def make_model_client(provider: str, configs: dict[str, ModelConfig]) -> Any:
     if provider not in configs:
         raise ValueError(f"Model provider '{provider}' is not configured.")
     config = configs[provider]
-    if config.provider == "qwen_transformers":
-        return TransformersLangChainClient(config)
     if config.provider == "gigachat_api" or provider == "gigachat":
         return GigaChatLangChainClient(config)
     return OpenAICompatibleClient(config)
@@ -145,18 +103,6 @@ def _to_langchain_message(message: ChatMessage | dict[str, Any]):
     if role == "assistant":
         return AIMessage(content=content)
     return HumanMessage(content=content)
-
-
-def _messages_to_prompt(messages: list[ChatMessage | dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for message in messages:
-        data = _message_to_dict(message)
-        role = str(data.get("role", "user")).strip()
-        content = str(data.get("content", "")).strip()
-        if content:
-            parts.append(f"{role}: {content}")
-    parts.append("assistant:")
-    return "\n\n".join(parts)
 
 
 def _rate_limiter(config: ModelConfig):

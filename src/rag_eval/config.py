@@ -12,6 +12,7 @@ class PathsConfig:
     run_outputs_dir: Path = Path("outputs/runs")
     metrics_outputs_dir: Path = Path("outputs/metrics")
     summary_metrics_file: Path = Path("outputs/metrics/metrics_summary.xlsx")
+    model_comparison_file: Path = Path("outputs/metrics/model_comparison.xlsx")
     log_file: Path = Path("outputs/logs/rag_eval.log")
 
 
@@ -92,14 +93,8 @@ class ModelConfig:
     temperature: float = 0
     verify_ssl: bool = True
     min_seconds_between_requests: float = 0
-    task: str = "text-generation"
-    device: int | None = None
-    device_map: str | None = "auto"
-    torch_dtype: str = "auto"
     local_files_only: bool = False
     max_new_tokens: int = 1024
-    do_sample: bool = False
-    return_full_text: bool = False
     embedding_device: str | None = None
     normalize_embeddings: bool = True
 
@@ -178,7 +173,7 @@ def _has_flat_config(module: Any) -> bool:
             "GOLDEN_QUESTIONS_PATH",
             "PIPELINE_FACTORY",
             "RETRIEVER_INIT_KWARGS",
-            "QWEN_MODEL_PATH",
+            "QWEN_MODEL",
             "GIGACHAT_BASE_URL",
             "RAGAS_JUDGE_PROVIDER",
         )
@@ -192,6 +187,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "run_outputs_dir": getattr(module, "RUN_OUTPUTS_DIR", "outputs/runs"),
             "metrics_outputs_dir": getattr(module, "METRICS_OUTPUTS_DIR", "outputs/metrics"),
             "summary_metrics_file": getattr(module, "SUMMARY_METRICS_FILE", "outputs/metrics/metrics_summary.xlsx"),
+            "model_comparison_file": getattr(module, "MODEL_COMPARISON_FILE", "outputs/metrics/model_comparison.xlsx"),
             "log_file": getattr(module, "LOG_FILE", "outputs/logs/rag_eval.log"),
         },
         "golden_columns": {
@@ -247,24 +243,14 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
         },
         "models": {
             "qwen": {
-                "provider": getattr(module, "QWEN_PROVIDER", "qwen_transformers"),
-                "model": getattr(module, "QWEN_MODEL", getattr(module, "QWEN_MODEL_PATH", "models/Qwen3-14B")),
+                "provider": "gigachat_api",
+                "model": getattr(module, "QWEN_MODEL", "Qwen"),
                 "base_url": getattr(module, "QWEN_BASE_URL", ""),
                 "access_token": getattr(module, "QWEN_ACCESS_TOKEN", ""),
-                "api_key_env": getattr(module, "QWEN_API_KEY_ENV", ""),
-                "auth_type": getattr(module, "QWEN_AUTH_TYPE", "none"),
                 "timeout_seconds": getattr(module, "QWEN_TIMEOUT_SECONDS", 60),
                 "temperature": getattr(module, "QWEN_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "QWEN_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "QWEN_MIN_SECONDS_BETWEEN_REQUESTS", 0),
-                "task": getattr(module, "QWEN_TASK", "text-generation"),
-                "device": getattr(module, "QWEN_DEVICE", None),
-                "device_map": getattr(module, "QWEN_DEVICE_MAP", "auto"),
-                "torch_dtype": getattr(module, "QWEN_TORCH_DTYPE", "auto"),
-                "local_files_only": getattr(module, "QWEN_LOCAL_FILES_ONLY", True),
-                "max_new_tokens": getattr(module, "QWEN_MAX_NEW_TOKENS", 1024),
-                "do_sample": getattr(module, "QWEN_DO_SAMPLE", False),
-                "return_full_text": getattr(module, "QWEN_RETURN_FULL_TEXT", False),
             },
             "bge_m3": {
                 "provider": "huggingface_embeddings",
@@ -287,17 +273,14 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "min_seconds_between_requests": getattr(module, "GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS", 10),
             },
             "glm": {
-                "provider": getattr(module, "GLM_PROVIDER", "openai_compatible"),
+                "provider": "gigachat_api",
                 "base_url": getattr(module, "GLM_BASE_URL", ""),
                 "access_token": getattr(module, "GLM_ACCESS_TOKEN", ""),
-                "api_key_env": getattr(module, "GLM_API_KEY_ENV", ""),
-                "auth_type": getattr(module, "GLM_AUTH_TYPE", "none"),
                 "model": getattr(module, "GLM_MODEL", "glm"),
                 "timeout_seconds": getattr(module, "GLM_TIMEOUT_SECONDS", 60),
                 "temperature": getattr(module, "GLM_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "GLM_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "GLM_MIN_SECONDS_BETWEEN_REQUESTS", 0),
-                "max_new_tokens": getattr(module, "GLM_MAX_NEW_TOKENS", 1024),
             },
         },
     }
@@ -310,6 +293,7 @@ def _paths(values: dict[str, Any], base_dir: Path) -> PathsConfig:
         "run_outputs_dir": values.get("run_outputs_dir", config.run_outputs_dir),
         "metrics_outputs_dir": values.get("metrics_outputs_dir", config.metrics_outputs_dir),
         "summary_metrics_file": values.get("summary_metrics_file", config.summary_metrics_file),
+        "model_comparison_file": values.get("model_comparison_file", config.model_comparison_file),
         "log_file": values.get("log_file", config.log_file),
     }
     return PathsConfig(
@@ -317,6 +301,7 @@ def _paths(values: dict[str, Any], base_dir: Path) -> PathsConfig:
         run_outputs_dir=_resolve(base_dir, raw["run_outputs_dir"]),
         metrics_outputs_dir=_resolve(base_dir, raw["metrics_outputs_dir"]),
         summary_metrics_file=_resolve(base_dir, raw["summary_metrics_file"]),
+        model_comparison_file=_resolve(base_dir, raw["model_comparison_file"]),
         log_file=_resolve(base_dir, raw["log_file"]),
     )
 

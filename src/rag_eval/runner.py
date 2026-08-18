@@ -9,7 +9,7 @@ import pandas as pd
 
 from rag_eval.config import AppConfig
 from rag_eval.generation import RagAnswerGenerator
-from rag_eval.io import contexts_to_json, read_table, to_json_text, write_run_json, write_xlsx
+from rag_eval.io import contexts_to_json, read_table, to_json_text, write_model_run_json, write_xlsx
 from rag_eval.logging_utils import setup_file_logger
 from rag_eval.pipeline import load_pipeline
 from rag_eval.schemas import PipelineResult
@@ -122,17 +122,54 @@ class EvaluationRunner:
                 time.sleep(self.config.run.sleep_seconds)
 
         run_path = self._make_run_path()
-        json_path = run_path.with_suffix(".json")
-        write_run_json(json_path, rows, run_path, parameters=run_parameters)
+        json_paths: dict[str, Path] = {}
+        for provider in generation_providers:
+            json_path = run_path.with_name(f"{run_path.stem}_{provider}.json")
+            provider_rows = [self._provider_json_row(row, provider) for row in rows]
+            provider_parameters = {
+                **run_parameters,
+                "answer_provider": provider,
+                "answer_model": self.config.models[provider].model if provider in self.config.models else None,
+            }
+            write_model_run_json(
+                json_path,
+                provider_rows,
+                run_path,
+                provider,
+                parameters=provider_parameters,
+            )
+            json_paths[provider] = json_path
         excel_rows = []
         for row in rows:
-            excel_row = {"json_file": str(json_path), **row}
+            excel_row = {
+                **{f"json_file_{provider}": str(path) for provider, path in json_paths.items()},
+                **row,
+            }
             for column in ("retriever_contexts", "reranker_contexts", "pipeline_metadata"):
                 excel_row[column] = to_json_text(excel_row[column])
             excel_rows.append(excel_row)
         write_xlsx(run_path, {"results": pd.DataFrame(excel_rows)})
-        logger.info("run_finished output=%s json=%s", run_path, json_path)
+        logger.info("run_finished output=%s model_json=%s", run_path, json_paths)
         return run_path
+
+    def _provider_json_row(self, row: dict[str, Any], provider: str) -> dict[str, Any]:
+        """Create a self-contained row with exactly one model answer."""
+        excluded = {
+            key
+            for key in row
+            if key.startswith("answer_") or key.startswith("error_")
+        }
+        provider_error = row.get(f"error_{provider}")
+        pipeline_error = row.get("error")
+        return {
+            **{key: value for key, value in row.items() if key not in excluded and key != "answer"},
+            "provider": provider,
+            "model": self.config.models[provider].model if provider in self.config.models else None,
+            "answer": row.get(f"answer_{provider}", row.get("answer")),
+            "generation_error": provider_error,
+            "pipeline_error": pipeline_error,
+            "error": provider_error or pipeline_error,
+        }
 
     def _run_parameters(self, pipeline: Any) -> dict[str, Any]:
         init = self.config.retriever_adapter.init_kwargs
@@ -174,7 +211,12 @@ class EvaluationRunner:
         }
 
     def _generation_providers(self) -> list[str]:
-        providers = self.config.generation.providers or [self.config.generation.provider]
+        providers = (
+            self.config.generation.providers
+            if self.config.generation.parallel
+            else [self.config.generation.provider]
+        )
+        providers = providers or [self.config.generation.provider]
         # Preserve config order while preventing duplicate calls/columns.
         return list(dict.fromkeys(provider for provider in providers if provider))
 

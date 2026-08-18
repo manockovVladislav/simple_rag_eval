@@ -8,7 +8,15 @@ import pandas as pd
 
 from rag_eval.config import AppConfig
 from rag_eval.custom_judge_evaluator import CustomJudgeEvaluator
-from rag_eval.io import append_json_rows, append_xlsx_rows, contexts_from_json, read_run_table
+from rag_eval.io import (
+    append_json_rows,
+    append_xlsx_rows,
+    contexts_from_json,
+    read_model_run_tables,
+    read_run_table,
+    to_json_text,
+    write_xlsx,
+)
 from rag_eval.logging_utils import setup_file_logger
 from rag_eval.ragas_evaluator import RagasEvaluator
 from rag_eval.retrieval_metrics import context_chunk_ids, parse_relevant_chunk_ids, retrieval_metrics_for_ids
@@ -35,7 +43,13 @@ class MetricsCalculator:
     def evaluate(self, run_file: str | Path) -> Path:
         logger = setup_file_logger(self.config.paths.log_file)
         run_path = Path(run_file)
-        frame, data_path = read_run_table(run_path)
+        configured_providers = self._configured_providers()
+        model_runs = read_model_run_tables(run_path, configured_providers)
+        if model_runs:
+            frame = _combine_model_run_frames(model_runs, self.config.generation.provider)
+            data_path = next(iter(model_runs.values()))[1]
+        else:
+            frame, data_path = read_run_table(run_path)
         logger.info("metrics_started run_file=%s data_file=%s rows=%s", run_path, data_path, len(frame))
         iterator = tqdm(frame.iterrows(), total=len(frame), desc="Calculating metrics")
         detail_rows = [self._row_metrics(row) for _, row in iterator]
@@ -45,8 +59,12 @@ class MetricsCalculator:
             evaluator = self._judge_evaluator()
             if providers:
                 for provider in providers:
-                    provider_frame = frame.copy()
-                    provider_frame["answer"] = provider_frame[f"answer_{provider}"]
+                    # Each model is judged sequentially from its own saved JSON.
+                    if provider in model_runs:
+                        provider_frame = model_runs[provider][0]
+                    else:
+                        provider_frame = frame.copy()
+                        provider_frame["answer"] = provider_frame[f"answer_{provider}"]
                     self._add_ragas_metrics(
                         provider_frame,
                         detail_rows,
@@ -201,7 +219,17 @@ class MetricsCalculator:
             ],
         )
         append_json_rows(summary_json_path, "retrieval", retrieval_rows)
-        logger.info("metrics_finished output=%s json=%s", summary_path, summary_json_path)
+        comparison_rows = self._comparison_rows(detail_rows)
+        write_xlsx(
+            self.config.paths.model_comparison_file,
+            {"model_comparison": pd.DataFrame(comparison_rows)},
+        )
+        logger.info(
+            "metrics_finished output=%s json=%s comparison=%s",
+            summary_path,
+            summary_json_path,
+            self.config.paths.model_comparison_file,
+        )
         return summary_path
 
     def latest_run_file(self) -> Path:
@@ -215,6 +243,7 @@ class MetricsCalculator:
         result: dict[str, Any] = {
             "question_id": row.get("question_id"),
             "question": row.get("question"),
+            "date": row.get("started_at") or row.get("date"),
             "ground_truth": ground_truth,
             "answer": row.get("answer"),
             "retriever_contexts": row.get("retriever_contexts"),
@@ -240,6 +269,41 @@ class MetricsCalculator:
                 result[f"answer_{provider}_token_f1"] = token_f1(expected_answer, provider_answer)
         result.update(self._retrieval_metrics(row))
         return result
+
+    def _configured_providers(self) -> list[str]:
+        configured = (
+            self.config.generation.providers
+            if self.config.generation.parallel
+            else [self.config.generation.provider]
+        )
+        return list(dict.fromkeys(
+            provider
+            for provider in (configured or [self.config.generation.provider])
+            if provider
+        ))
+
+    def _comparison_rows(self, detail_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        providers = self._configured_providers()
+        rows: list[dict[str, Any]] = []
+        for detail in detail_rows:
+            contexts = (
+                detail.get("retriever_contexts")
+                if self.config.metrics.ragas_context_source == "retriever"
+                else detail.get("reranker_contexts")
+            )
+            if not contexts:
+                contexts = detail.get("reranker_contexts") or detail.get("retriever_contexts")
+            output: dict[str, Any] = {
+                "date": detail.get("date"),
+                "question": detail.get("question"),
+                "context": to_json_text(contexts_from_json(contexts)),
+                "correct_answer": detail.get("ground_truth"),
+            }
+            for provider in providers:
+                output[f"answer_{provider}"] = detail.get(f"answer_{provider}")
+                output.update(_comparison_metrics(detail, provider))
+            rows.append(output)
+        return rows
 
     def _retrieval_metrics(self, row: pd.Series) -> dict[str, Any]:
         relevant_ids = parse_relevant_chunk_ids(row.get("relevant_chunk_ids"))
@@ -477,3 +541,47 @@ def _provider_judge_column(column: str, provider: str) -> str:
     if column.startswith("ragas_"):
         return f"ragas_{provider}_{column[len('ragas_'):]}"
     return f"{provider}_{column}"
+
+
+def _combine_model_run_frames(
+    model_runs: dict[str, tuple[pd.DataFrame, Path]],
+    primary_provider: str,
+) -> pd.DataFrame:
+    """Combine model JSONs for reporting while preserving their independent storage."""
+    first_provider, (first_frame, _) = next(iter(model_runs.items()))
+    frame = first_frame.copy()
+    for column in ("answer", "provider", "model", "generation_error"):
+        if column in frame:
+            frame = frame.drop(columns=column)
+
+    expected_ids = list(first_frame.get("question_id", pd.Series(range(len(first_frame)))))
+    for provider, (provider_frame, _) in model_runs.items():
+        provider_ids = list(provider_frame.get("question_id", pd.Series(range(len(provider_frame)))))
+        if provider_ids != expected_ids:
+            raise ValueError(f"Model JSON '{provider}' contains a different question set or order.")
+        frame[f"answer_{provider}"] = list(
+            provider_frame.get("answer", pd.Series([None] * len(frame)))
+        )
+        error_column = "generation_error" if "generation_error" in provider_frame else "error"
+        frame[f"error_{provider}"] = list(
+            provider_frame.get(error_column, pd.Series([None] * len(frame)))
+        )
+
+    selected_primary = primary_provider if primary_provider in model_runs else first_provider
+    frame["answer"] = frame[f"answer_{selected_primary}"]
+    return frame
+
+
+def _comparison_metrics(detail: dict[str, Any], provider: str) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    answer_prefix = f"answer_{provider}_"
+    judge_prefix = f"ragas_{provider}_"
+    for key, value in detail.items():
+        if key.startswith(answer_prefix) and key != f"answer_{provider}_has_error":
+            metrics[f"metric_{provider}_{key[len(answer_prefix):]}"] = value
+        elif key.startswith(judge_prefix) and _judge_score_columns(key):
+            metrics[f"metric_{provider}_{key[len(judge_prefix):]}"] = value
+    metrics[f"metric_{provider}_error"] = (
+        detail.get(f"ragas_{provider}_error") or detail.get(f"error_{provider}")
+    )
+    return metrics
