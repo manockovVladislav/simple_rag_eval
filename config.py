@@ -85,8 +85,8 @@ SLEEP_SECONDS = 0
 
 # Генерация финального RAG-ответа после retriever/reranker.
 #
-# RAG_LLM_PROVIDER и RAGAS_JUDGE_PROVIDER можно выставлять независимо:
-# например, RAG_LLM_PROVIDER = "gigachat", RAGAS_JUDGE_PROVIDER = "qwen".
+# RAG_LLM_PROVIDER выбирает основную отвечающую модель, а судья настраивается
+# независимо через RAGAS_JUDGE_PROVIDER = "judge" и блок JUDGE_* ниже.
 RAG_ANSWER_ENABLED = True
 # Первый provider остается основным: его ответ также пишется в старую колонку `answer`.
 RAG_LLM_PROVIDER = "gigachat"
@@ -111,12 +111,12 @@ RETRIEVAL_K_VALUES = [5, 10]
 # Судья вызывается отдельно от трех моделей, генерирующих ответы.
 RAGAS_ENABLED = True
 RAGAS_BACKEND = "custom"  # "custom" - простой надежный judge; "ragas" - библиотека ragas.
-RAGAS_JUDGE_PROVIDER = "gigachat"
+RAGAS_JUDGE_PROVIDER = "judge"
 RAGAS_EMBEDDINGS_PROVIDER = "bge_m3"
 RAGAS_CONTEXT_SOURCE = "retriever"
 RAGAS_TIMEOUT_SECONDS = 20
 RAGAS_MAX_WORKERS = 1
-# Для RAGAS_BACKEND = "custom" это количество retry при невалидном JSON от GigaChat.
+# Для RAGAS_BACKEND = "custom" это число retry при ошибке API или невалидном JSON.
 RAGAS_MAX_RETRIES = 3
 # Полный контекст всегда остается в run JSON; этот лимит защищает окно judge API.
 RAGAS_JUDGE_MAX_CONTEXT_CHARS = 60_000
@@ -146,6 +146,7 @@ QWEN_VERIFY_SSL = False
 QWEN_MIN_SECONDS_BETWEEN_REQUESTS = 0
 QWEN_TIMEOUT_SECONDS = 60
 QWEN_TEMPERATURE = 0
+QWEN_MAX_ATTEMPTS = 3
 
 # --- GigaChat: текущий домашний контур ---
 # Для langchain-gigachat указывается базовый API URL, без /chat/completions.
@@ -156,6 +157,9 @@ GIGACHAT_ACCESS_TOKEN = os.getenv("GIGACHAT_ACCESS_TOKEN", "")
 GIGACHAT_MODEL = "GigaChat"
 GIGACHAT_TEMPERATURE = 0
 GIGACHAT_VERIFY_SSL = False
+GIGACHAT_TIMEOUT_SECONDS = 60
+GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 0
+GIGACHAT_MAX_ATTEMPTS = 3
 
 # --- GLM: GigaChat-compatible API в изолированном контуре ---
 GLM_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
@@ -165,6 +169,7 @@ GLM_TIMEOUT_SECONDS = 60
 GLM_TEMPERATURE = 0
 GLM_VERIFY_SSL = False
 GLM_MIN_SECONDS_BETWEEN_REQUESTS = 0
+GLM_MAX_ATTEMPTS = 3
 
 # --- GigaChat: рабочий изолированный контур ---
 # Когда будешь запускать в рабочем контуре, закомментируй домашний блок выше
@@ -176,7 +181,16 @@ GLM_MIN_SECONDS_BETWEEN_REQUESTS = 0
 # GIGACHAT_TEMPERATURE = 0
 # GIGACHAT_VERIFY_SSL = True
 
+# --- Отдельная модель-судья ---
+# Этот блок не затрагивает GIGACHAT_*, QWEN_* и GLM_*, генерирующие ответы.
+JUDGE_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
+JUDGE_ACCESS_TOKEN = os.getenv("JUDGE_ACCESS_TOKEN", os.getenv("GIGACHAT_ACCESS_TOKEN", ""))
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "GigaChat")
+JUDGE_TIMEOUT_SECONDS = 20
+JUDGE_TEMPERATURE = 0
+JUDGE_VERIFY_SSL = False
+
 # Ограничение тестовой системы для GigaChat-судьи.
 # Это не параметр GigaChat API. Нужно для режима 1 запрос раз в 20 секунд.
 # RAGAS_MAX_WORKERS выше должен оставаться 1.
-GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 20
+JUDGE_MIN_SECONDS_BETWEEN_REQUESTS = 20

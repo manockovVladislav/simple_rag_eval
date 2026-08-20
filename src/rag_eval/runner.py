@@ -192,9 +192,7 @@ class EvaluationRunner:
             "parallel_generation": self.config.generation.parallel,
             "temperature": generation_model.temperature if generation_model else None,
             "judge_model_name": judge_model.model if judge_model else None,
-            "judge_temperature": 0.0 if self.config.metrics.ragas_backend == "custom" else (
-                judge_model.temperature if judge_model else None
-            ),
+            "judge_temperature": judge_model.temperature if judge_model else None,
             "k_rrf": actual("k_rrf", 60),
             "fusion_method": actual("fusion_method", "rrf"),
             "alpha": actual("alpha", 0.5),

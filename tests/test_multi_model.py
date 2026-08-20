@@ -5,7 +5,7 @@ import unittest
 
 import pandas as pd
 
-from rag_eval.config import AppConfig, GenerationConfig, MetricsConfig
+from rag_eval.config import AppConfig, GenerationConfig, MetricsConfig, ModelConfig
 from rag_eval.generation import RagAnswerGenerator
 from rag_eval.metrics import MetricsCalculator, _combine_model_run_frames, _provider_judge_column
 from rag_eval.schemas import ContextItem, PipelineResult
@@ -23,7 +23,35 @@ class _DelayedClient:
         return self.answer or ""
 
 
+class _FlakyClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def chat(self, _messages) -> str:
+        self.calls += 1
+        if self.calls < 3:
+            raise TimeoutError("temporary timeout")
+        return "answer after retry"
+
+
 class MultiModelGenerationTests(unittest.TestCase):
+    def test_generation_retries_up_to_configured_attempt_count(self) -> None:
+        config = AppConfig(
+            generation=GenerationConfig(provider="qwen", context_source="retriever"),
+            models={"qwen": ModelConfig(model="Qwen", max_attempts=3)},
+        )
+        client = _FlakyClient()
+        generator = RagAnswerGenerator(config)
+        generator._clients = {"qwen": client}
+
+        answer = generator.generate(
+            "question",
+            PipelineResult(retriever_contexts=[ContextItem(text="context")]),
+        )
+
+        self.assertEqual(answer, "answer after retry")
+        self.assertEqual(client.calls, 3)
+
     def test_parallel_generation_is_concurrent_and_isolates_model_error(self) -> None:
         config = AppConfig(
             generation=GenerationConfig(

@@ -132,7 +132,24 @@ RAG_PARALLEL_GENERATION_ENABLED = False
 
 ```python
 RAGAS_BACKEND = "custom"
-RAGAS_JUDGE_PROVIDER = "gigachat"
+RAGAS_JUDGE_PROVIDER = "judge"
+
+JUDGE_BASE_URL = "https://gigachat.devices.sberbank.ru/api/v1"
+JUDGE_ACCESS_TOKEN = "..."
+JUDGE_MODEL = "GigaChat"
+JUDGE_TIMEOUT_SECONDS = 20
+JUDGE_TEMPERATURE = 0
+JUDGE_VERIFY_SSL = False
+JUDGE_MIN_SECONDS_BETWEEN_REQUESTS = 20
+```
+
+Повторы запросов отвечающих моделей задаются отдельно. Значение `3` означает не более трёх
+полных попыток, включая первый запрос:
+
+```python
+GIGACHAT_MAX_ATTEMPTS = 3
+QWEN_MAX_ATTEMPTS = 3
+GLM_MAX_ATTEMPTS = 3
 ```
 
 ## GigaChat, Qwen и GLM
@@ -160,11 +177,11 @@ GLM_TEMPERATURE = 0
 
 ```python
 RAGAS_MAX_WORKERS = 1
-GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS = 10
+JUDGE_MIN_SECONDS_BETWEEN_REQUESTS = 20
 RAGAS_JUDGE_MAX_CONTEXT_CHARS = 60000
 ```
 
-`GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS` - это локальный rate limit тестовой системы, не параметр GigaChat API.
+`JUDGE_MIN_SECONDS_BETWEEN_REQUESTS` - это локальный rate limit тестовой системы, не параметр GigaChat API.
 Полные контексты не обрезаются в run JSON. `RAGAS_JUDGE_MAX_CONTEXT_CHARS` ограничивает
 только копию, передаваемую судье, чтобы не превысить окно модели.
 
@@ -267,6 +284,11 @@ JSON — полный источник данных без лимита длин
 Каждый run также хранит snapshot параметров. В `metrics_summary` выводятся `model_name`, `temperature`,
 `judge_model_name`, `judge_temperature`, `k_rrf`, `fusion_method`, `alpha`, `bias`, `rerank_initial_k`,
 `retriever_top_k`, а также средние `retriever_context_count_mean` и `reranker_context_count_mean`.
+
+`ragas_judge_score_mean` — равновесное среднее по всем доступным score-метрикам судьи. Сначала для
+каждой метрики считается среднее по вопросам без пустых значений, затем эти средние усредняются
+с одинаковым весом. Колонки `*_reason`, `*_evidence`, `*_raw` и `*_error` в расчёт не входят. В мультимодельном
+режиме также считаются `ragas_<provider>_judge_score_mean` отдельно для GigaChat, Qwen и GLM.
 В `main.ipynb` есть отключённая по умолчанию ячейка grid search; каждая комбинация создаёт отдельный run.
 
 Листы:

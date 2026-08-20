@@ -63,7 +63,7 @@ class MetricsConfig:
     answer_enabled: bool = True
     ragas_enabled: bool = True
     ragas_backend: str = "ragas"
-    ragas_judge_provider: str = "qwen"
+    ragas_judge_provider: str = "judge"
     ragas_embeddings_provider: str = ""
     ragas_context_source: str = "reranker"
     ragas_timeout_seconds: int = 60
@@ -95,6 +95,7 @@ class ModelConfig:
     min_seconds_between_requests: float = 0
     local_files_only: bool = False
     max_new_tokens: int = 1024
+    max_attempts: int = 1
     embedding_device: str | None = None
     normalize_embeddings: bool = True
 
@@ -227,7 +228,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
             "answer_enabled": getattr(module, "ANSWER_METRICS_ENABLED", True),
             "ragas_enabled": getattr(module, "RAGAS_ENABLED", True),
             "ragas_backend": getattr(module, "RAGAS_BACKEND", "ragas"),
-            "ragas_judge_provider": getattr(module, "RAGAS_JUDGE_PROVIDER", "qwen"),
+            "ragas_judge_provider": getattr(module, "RAGAS_JUDGE_PROVIDER", "judge"),
             "ragas_embeddings_provider": getattr(module, "RAGAS_EMBEDDINGS_PROVIDER", ""),
             "ragas_context_source": getattr(module, "RAGAS_CONTEXT_SOURCE", "reranker"),
             "ragas_timeout_seconds": getattr(module, "RAGAS_TIMEOUT_SECONDS", 60),
@@ -251,6 +252,7 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "temperature": getattr(module, "QWEN_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "QWEN_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "QWEN_MIN_SECONDS_BETWEEN_REQUESTS", 0),
+                "max_attempts": getattr(module, "QWEN_MAX_ATTEMPTS", 1),
             },
             "bge_m3": {
                 "provider": "huggingface_embeddings",
@@ -271,6 +273,8 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "temperature": getattr(module, "GIGACHAT_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "GIGACHAT_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "GIGACHAT_MIN_SECONDS_BETWEEN_REQUESTS", 10),
+                "timeout_seconds": getattr(module, "GIGACHAT_TIMEOUT_SECONDS", 60),
+                "max_attempts": getattr(module, "GIGACHAT_MAX_ATTEMPTS", 1),
             },
             "glm": {
                 "provider": "gigachat_api",
@@ -281,6 +285,17 @@ def _config_from_flat_variables(module: Any) -> dict[str, Any]:
                 "temperature": getattr(module, "GLM_TEMPERATURE", 0),
                 "verify_ssl": getattr(module, "GLM_VERIFY_SSL", True),
                 "min_seconds_between_requests": getattr(module, "GLM_MIN_SECONDS_BETWEEN_REQUESTS", 0),
+                "max_attempts": getattr(module, "GLM_MAX_ATTEMPTS", 1),
+            },
+            "judge": {
+                "provider": "gigachat_api",
+                "base_url": getattr(module, "JUDGE_BASE_URL", ""),
+                "access_token": getattr(module, "JUDGE_ACCESS_TOKEN", ""),
+                "model": getattr(module, "JUDGE_MODEL", "GigaChat"),
+                "timeout_seconds": getattr(module, "JUDGE_TIMEOUT_SECONDS", 60),
+                "temperature": getattr(module, "JUDGE_TEMPERATURE", 0),
+                "verify_ssl": getattr(module, "JUDGE_VERIFY_SSL", True),
+                "min_seconds_between_requests": getattr(module, "JUDGE_MIN_SECONDS_BETWEEN_REQUESTS", 0),
             },
         },
     }

@@ -186,10 +186,7 @@ class CustomJudgeEvaluator:
         model_config = self.config.models[provider]
         if model_config.provider != "gigachat_api" and provider != "gigachat":
             raise ValueError("Custom judge is intended for provider='gigachat'.")
-        self._llm = _make_gigachat_model(
-            model_config,
-            timeout_seconds=self.config.metrics.ragas_timeout_seconds,
-        )
+        self._llm = _make_gigachat_model(model_config)
         return self._llm
 
     def _embed_text(self, text: str) -> list[float]:
@@ -217,7 +214,7 @@ class CustomJudgeEvaluator:
         return self._embeddings
 
 
-def _make_gigachat_model(model_config: ModelConfig, timeout_seconds: int | None = None):
+def _make_gigachat_model(model_config: ModelConfig):
     try:
         from langchain_gigachat.chat_models import GigaChat
     except ImportError:
@@ -227,9 +224,8 @@ def _make_gigachat_model(model_config: ModelConfig, timeout_seconds: int | None 
         base_url=model_config.base_url,
         access_token=model_config.access_token,
         model=model_config.model,
-        # Judge must be deterministic even if generation uses another temperature.
-        temperature=0.0,
-        timeout=timeout_seconds or model_config.timeout_seconds,
+        temperature=model_config.temperature,
+        timeout=model_config.timeout_seconds,
         verify_ssl_certs=model_config.verify_ssl,
         rate_limiter=_rate_limiter(model_config),
     )

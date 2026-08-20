@@ -253,6 +253,7 @@ def _make_gigachat_langchain_llm(model_config: ModelConfig):
         access_token=model_config.access_token,
         model=model_config.model,
         temperature=model_config.temperature,
+        timeout=model_config.timeout_seconds,
         verify_ssl_certs=model_config.verify_ssl,
         rate_limiter=_rate_limiter(model_config),
     )

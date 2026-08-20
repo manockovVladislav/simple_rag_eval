@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from rag_eval.config import AppConfig
 from rag_eval.llm_clients import ChatMessage, make_model_client
 from rag_eval.schemas import ContextItem, PipelineResult
+
+
+logger = logging.getLogger(__name__)
 
 
 class RagAnswerGenerator:
@@ -25,7 +29,22 @@ class RagAnswerGenerator:
             ChatMessage(role="system", content=self.config.generation.system_prompt),
             ChatMessage(role="user", content=self._user_prompt(question, contexts)),
         ]
-        return self._model(provider).chat(messages).strip()
+        model_config = self.config.models.get(provider)
+        max_attempts = max(1, model_config.max_attempts) if model_config else 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._model(provider).chat(messages).strip()
+            except Exception:
+                if attempt == max_attempts:
+                    raise
+                logger.warning(
+                    "rag_llm_request_retry provider=%s attempt=%s max_attempts=%s",
+                    provider,
+                    attempt + 1,
+                    max_attempts,
+                    exc_info=True,
+                )
+        raise RuntimeError("unreachable")
 
     def generate_many(self, question: str, result: PipelineResult) -> dict[str, dict[str, str | None]]:
         """Issue independent blocking API calls concurrently in a bounded thread pool."""
